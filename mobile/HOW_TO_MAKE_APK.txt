@@ -1,0 +1,23 @@
+DIAMONDEDGE — GET AN APK (NO PWABUILDER WEBSITE)
+
+You need ONE big install first: Android Studio from https://developer.android.com/studio
+
+Then copy/paste these in PowerShell:
+
+  cd PATH\TO\DiamondEdge-Simulator\mobile
+  npm install
+  npx cap add android
+  npx cap sync android
+  npx cap open android
+
+Android Studio opens. Wait for Gradle sync to finish.
+
+  Build menu → Build Bundle(s) / APK(s) → Build APK(s)
+  When done: click “locate” in the toast — your .apk path is shown
+
+Install APK on phone: enable “Install unknown apps” for your file browser, tap the APK file.
+
+CHANGE THE URL LATER:
+  Edit capacitor.config.json → server.url and www/index.html link, then:
+  npx cap sync android
+  rebuild APK in Android Studio

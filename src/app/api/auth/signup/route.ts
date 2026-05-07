@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { applyUserSessionCookie, hashPassword, hashToken, newVerificationTokenRaw } from "@/lib/userAuth";
-import { sendVerificationEmail } from "@/lib/mail";
+import { notifyOwnerNewSignup, sendVerificationEmail } from "@/lib/mail";
 import { rateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
@@ -89,6 +89,7 @@ export async function POST(req: NextRequest) {
         console.error("[signup] prisma create failed:", e);
         return NextResponse.json({ error: prismaSignupErrorMessage(e) }, { status: 500 });
       }
+      await notifyOwnerNewSignup(user.email);
       const res = NextResponse.json({
         ok: true,
         loggedIn: true,
@@ -107,6 +108,7 @@ export async function POST(req: NextRequest) {
       console.error("[signup] prisma create failed:", e);
       return NextResponse.json({ error: prismaSignupErrorMessage(e) }, { status: 500 });
     }
+    await notifyOwnerNewSignup(user.email, { awaitingEmailVerification: true });
 
     const raw = newVerificationTokenRaw();
     try {

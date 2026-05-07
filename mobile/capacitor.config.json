@@ -1,0 +1,12 @@
+{
+  "appId": "app.diamondedge.simulator",
+  "appName": "DiamondEdge",
+  "webDir": "www",
+  "server": {
+    "url": "https://diamond-edge-simulator.vercel.app",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

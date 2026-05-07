@@ -4,8 +4,10 @@ import { HITTER_MATRIX, PITCHER_MATRIX, PickKind, StatKey } from "./playerPropCa
 const MLB = "https://statsapi.mlb.com/api/v1";
 
 /** Full active roster per team (all position players / all pitchers). */
-const rosterHittersCache = new Map<number, string[]>();
-const rosterPitchersCache = new Map<number, string[]>();
+const ROSTER_CACHE_TTL_MS = 1000 * 60 * 60 * 3; // 3 hours
+type CachedNames = { names: string[]; expiresAt: number };
+const rosterHittersCache = new Map<number, CachedNames>();
+const rosterPitchersCache = new Map<number, CachedNames>();
 
 async function fetchJson(url: string) {
   const res = await fetch(url, { next: { revalidate: 300 } });
@@ -15,7 +17,8 @@ async function fetchJson(url: string) {
 
 /** Every active position player (non-P) on the 26-man / active roster. */
 export async function getHitterNamesForTeam(teamId: number): Promise<string[]> {
-  if (rosterHittersCache.has(teamId)) return rosterHittersCache.get(teamId)!;
+  const cached = rosterHittersCache.get(teamId);
+  if (cached && Date.now() < cached.expiresAt) return cached.names;
   try {
     const data = await fetchJson(`${MLB}/teams/${teamId}/roster?rosterType=active`);
     const roster = (data.roster ?? []) as Array<{ position?: { abbreviation?: string }; person?: { fullName?: string } }>;
@@ -24,7 +27,7 @@ export async function getHitterNamesForTeam(teamId: number): Promise<string[]> {
       .map((r) => r.person?.fullName)
       .filter(Boolean) as string[];
     const unique = [...new Set(names)];
-    rosterHittersCache.set(teamId, unique);
+    rosterHittersCache.set(teamId, { names: unique, expiresAt: Date.now() + ROSTER_CACHE_TTL_MS });
     return unique;
   } catch {
     return [];
@@ -33,7 +36,8 @@ export async function getHitterNamesForTeam(teamId: number): Promise<string[]> {
 
 /** Every active pitcher on the roster. */
 async function getPitcherNamesForTeam(teamId: number): Promise<string[]> {
-  if (rosterPitchersCache.has(teamId)) return rosterPitchersCache.get(teamId)!;
+  const cached = rosterPitchersCache.get(teamId);
+  if (cached && Date.now() < cached.expiresAt) return cached.names;
   try {
     const data = await fetchJson(`${MLB}/teams/${teamId}/roster?rosterType=active`);
     const roster = (data.roster ?? []) as Array<{ position?: { abbreviation?: string }; person?: { fullName?: string } }>;
@@ -42,7 +46,7 @@ async function getPitcherNamesForTeam(teamId: number): Promise<string[]> {
       .map((r) => r.person?.fullName)
       .filter(Boolean) as string[];
     const unique = [...new Set(names)];
-    rosterPitchersCache.set(teamId, unique);
+    rosterPitchersCache.set(teamId, { names: unique, expiresAt: Date.now() + ROSTER_CACHE_TTL_MS });
     return unique;
   } catch {
     return [];

@@ -5,6 +5,7 @@
  */
 
 import { GameCard, Market } from "./types";
+import { HITTER_MATRIX, PITCHER_MATRIX, type PickKind, type StatKey } from "./playerPropCatalog";
 
 const REVALIDATE_SEC = 600;
 
@@ -144,30 +145,153 @@ function getPreferredBook(event: { bookmakers?: Array<{ key?: string; markets?: 
 }
 
 function mergeEventsById(lists: unknown[][]): unknown[] {
-  const map = new Map<string, { ev: Record<string, unknown>; markets: unknown[] }>();
+  type Bk = { key?: string; title?: string; markets?: unknown[] };
+  const byEvent = new Map<string, { ev: Record<string, unknown>; books: Map<string, { bk: Record<string, unknown>; markets: unknown[] }> }>();
+
   for (const list of lists) {
     for (const raw of list) {
-      const ev = raw as { id?: string; bookmakers?: Array<{ markets?: unknown[] }> };
+      const ev = raw as { id?: string; bookmakers?: Bk[] };
       const id = String(ev.id ?? "");
       if (!id) continue;
-      const mk = [...(ev.bookmakers?.[0]?.markets ?? [])];
-      if (!map.has(id)) map.set(id, { ev: ev as Record<string, unknown>, markets: mk });
-      else map.get(id)!.markets.push(...mk);
+      let slot = byEvent.get(id);
+      if (!slot) {
+        slot = { ev: ev as Record<string, unknown>, books: new Map() };
+        byEvent.set(id, slot);
+      }
+      for (const bk of ev.bookmakers ?? []) {
+        const k = String(bk.key ?? "unknown").trim().toLowerCase() || "unknown";
+        const next = [...(bk.markets ?? [])];
+        if (!slot.books.has(k))
+          slot.books.set(k, { bk: { ...(bk as Record<string, unknown>) }, markets: next });
+        else slot.books.get(k)!.markets.push(...next);
+      }
     }
   }
-  return [...map.values()].map(({ ev, markets }) => {
-    const bms = (ev.bookmakers as Array<Record<string, unknown>> | undefined) ?? [];
-    if (bms.length) {
-      return { ...ev, bookmakers: [{ ...bms[0], markets }] };
-    }
-    return { ...ev, bookmakers: [{ key: "fanduel", title: "FanDuel", markets }] };
+
+  return [...byEvent.values()].map(({ ev, books }) => {
+    const bookmakers = [...books.values()].map(({ bk, markets }) => ({ ...bk, markets }));
+    return { ...ev, bookmakers: bookmakers.length ? bookmakers : [{ key: "fanduel", title: "FanDuel", markets: [] }] };
   });
+}
+
+const PLAYER_PROP_API_KEYS = new Set([
+  "batter_hits",
+  "batter_home_runs",
+  "batter_home_runs_alternate",
+  "batter_total_bases",
+  "batter_rbis",
+  "batter_runs_scored",
+  "batter_hits_runs_rbis",
+  "pitcher_strikeouts",
+  "batter_walks"
+]);
+
+const API_KEY_TO_STAT: Record<string, StatKey | undefined> = {
+  batter_hits: "hits",
+  batter_home_runs: "hr",
+  batter_home_runs_alternate: "hr",
+  batter_total_bases: "tb",
+  batter_rbis: "rbi",
+  batter_runs_scored: "runs",
+  batter_hits_runs_rbis: "hrr",
+  pitcher_strikeouts: "k",
+  batter_walks: "walks"
+};
+
+function statLabel(stat: StatKey): string {
+  return stat === "k" ? PITCHER_MATRIX.k.label : HITTER_MATRIX[stat as Exclude<StatKey, "k">].label;
+}
+
+/** Build player prop markets straight from Odds API (all listed books) — avoids roster line mismatch. */
+export function buildPlayerPropsFromOddsEvents(events: unknown[], games: GameCard[]): Market[] {
+  const rows: Market[] = [];
+  for (const raw of events) {
+    const ev = raw as Record<string, unknown>;
+    const game = findGameForEvent(ev as { home_team?: string; away_team?: string }, games);
+    if (!game) continue;
+    const bms = (ev.bookmakers as Array<{ key?: string; markets?: unknown[] }>) ?? [];
+    for (const bk of bms) {
+      const bkKey = String(bk.key ?? "unknown").trim().toLowerCase();
+      const mkts = bk.markets ?? [];
+      for (const mRaw of mkts) {
+        const mk = mRaw as { key?: string; outcomes?: OddsOutcome[] };
+        const apiKey = mk.key ?? "";
+        if (!PLAYER_PROP_API_KEYS.has(apiKey)) continue;
+        const stat = API_KEY_TO_STAT[apiKey];
+        if (!stat) continue;
+
+        for (const o of mk.outcomes ?? []) {
+          if (typeof o.price !== "number") continue;
+          const playerName = outcomePlayerLabel(o).trim();
+          if (!playerName || SIDE_WORD.test(playerName)) continue;
+
+          const nm = String(o.name ?? "").trim().toLowerCase();
+          const pt = o.point;
+          let selection = "";
+          let line: number | null = pt ?? null;
+          let pickKind: PickKind;
+
+          if (stat === "hr" && (nm === "yes" || nm === "no")) {
+            pickKind = "yes_no";
+            line = null;
+            selection = nm === "yes" ? `${playerName} · To hit a home run (Yes)` : `${playerName} · To hit a home run (No)`;
+          } else if (nm === "over" || nm === "under") {
+            pickKind = "over_under";
+            const side = nm === "over" ? "Over" : "Under";
+            const ln = pt != null ? String(pt) : "";
+            selection = `${playerName} · ${side} ${ln} ${statLabel(stat)}`.replace(/\s+/g, " ").trim();
+          } else {
+            continue;
+          }
+
+          const id = `${game.id}-sb-${stat}-${idSlug(playerName)}-${idSlug(apiKey)}-${nm}-${String(pt ?? "x")}-${bkKey}`.slice(0, 120);
+          rows.push({
+            id,
+            gameId: game.id,
+            marketType: `player_${stat}`,
+            selection,
+            line,
+            american: o.price,
+            source: bkKey,
+            playerName,
+            statKey: stat,
+            pickKind,
+            tierMin: null
+          });
+        }
+      }
+    }
+  }
+  return rows;
+}
+
+function idSlug(s: string, max = 36): string {
+  return s.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, max);
 }
 
 const CORE_MARKETS =
   "h2h,spreads,totals,h2h_1st_5_innings,totals_1st_1_innings,team_totals,alternate_team_totals";
 const PLAYER_MARKETS =
   "batter_hits,batter_home_runs,batter_home_runs_alternate,batter_total_bases,batter_rbis,batter_runs_scored,batter_hits_runs_rbis,pitcher_strikeouts,batter_walks";
+
+/** When core requests only have ML/spreads/totals, graft a player-only Odds API pull onto matching game IDs. */
+async function augmentEventsWithStandalonePlayerOdds(events: unknown[]): Promise<unknown[]> {
+  const k = process.env.ODDS_API_KEY?.trim();
+  if (!k || !events.length) return events;
+  const url =
+    "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds" +
+    `?apiKey=${encodeURIComponent(k)}&regions=us&oddsFormat=american&markets=${PLAYER_MARKETS}`;
+  try {
+    const res = await fetch(url, { next: { revalidate: REVALIDATE_SEC } });
+    if (!res.ok) return events;
+    const extra = (await res.json()) as unknown[];
+    if (!Array.isArray(extra) || !extra.length) return events;
+    const combined = mergeEventsById([events, extra]);
+    return combined.length ? combined : events;
+  } catch {
+    return events;
+  }
+}
 
 async function logOddsApiError(res: Response, tag: string): Promise<void> {
   let body = "";
@@ -220,7 +344,7 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
         remaining: res.headers.get("x-requests-remaining") ?? undefined,
         used: res.headers.get("x-requests-used") ?? undefined
       });
-      return out;
+      return await augmentEventsWithStandalonePlayerOdds(out);
     }
     await logOddsApiError(res, "combined");
   } catch (e) {
@@ -259,7 +383,7 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
           remaining: c.headers.get("x-requests-remaining") ?? d.headers.get("x-requests-remaining") ?? undefined,
           used: c.headers.get("x-requests-used") ?? d.headers.get("x-requests-used") ?? undefined
         });
-        return mergedAny;
+        return await augmentEventsWithStandalonePlayerOdds(mergedAny);
       }
       // Final fallback: featured markets only, broader regions.
       const wide = await fetch(baseFeaturedWide, { next: { revalidate: REVALIDATE_SEC } });
@@ -272,7 +396,7 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
           remaining: wide.headers.get("x-requests-remaining") ?? undefined,
           used: wide.headers.get("x-requests-used") ?? undefined
         });
-        return wideEvents;
+        return await augmentEventsWithStandalonePlayerOdds(wideEvents);
       }
       setOddsDebug({
         status: "no_events",
@@ -289,7 +413,7 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
         used: a.headers.get("x-requests-used") ?? b.headers.get("x-requests-used") ?? undefined
       });
     }
-    return merged;
+    return await augmentEventsWithStandalonePlayerOdds(merged);
   } catch (e) {
     setOddsDebug({
       status: "exception",

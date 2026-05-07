@@ -1,7 +1,7 @@
 import { mockGameDetails, mockGames, mockMarkets } from "./mockData";
 import { isSportsbookLineSource } from "./odds";
 import { buildPlayerPropMarkets } from "./rosterProps";
-import { fetchMlbOddsEvents, mergeFanDuelPrices } from "./theOddsFanDuel";
+import { buildPlayerPropsFromOddsEvents, fetchMlbOddsEvents, mergeFanDuelPrices } from "./theOddsFanDuel";
 import { GameCard, GameDetail, Market, PlayerCard } from "./types";
 
 const MLB_STATS_API = "https://statsapi.mlb.com/api/v1";
@@ -145,26 +145,31 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
   const game = games.find((g) => g.id === gameId);
   if (!game) return mockMarkets.filter((m) => m.gameId === gameId);
   const base = generateMarketsForGame(game);
-  const player = await buildPlayerPropMarkets(game);
+  const useOddsProps = !!process.env.ODDS_API_KEY?.trim();
+  const player = useOddsProps ? [] : await buildPlayerPropMarkets(game);
   const events = await fetchMlbOddsEvents();
   const merged = mergeFanDuelPrices([...base, ...player], games, events);
-  // Strict mode: when ODDS_API_KEY is configured, only show sportsbook-sourced lines.
-  if (process.env.ODDS_API_KEY?.trim()) {
-    return merged.filter((m) => isSportsbookLineSource(m.source));
+  // Odds-key mode: roster props rarely match Odds API line shapes; attach sportsbook-side props parsed from API.
+  let out = merged;
+  if (useOddsProps) {
+    const apiPlayer = buildPlayerPropsFromOddsEvents(events, games).filter((m) => m.gameId === gameId);
+    out = [...merged, ...apiPlayer];
   }
-  return merged;
+  return useOddsProps ? out.filter((m) => isSportsbookLineSource(m.source)) : out;
 }
 
 export async function getAllMarkets(): Promise<Market[]> {
   const games = await getDailySchedule();
   if (!games.length) return mockMarkets;
   const core = games.flatMap((g) => generateMarketsForGame(g));
-  const playerBlocks = await Promise.all(games.map((g) => buildPlayerPropMarkets(g)));
+  const useOddsProps = !!process.env.ODDS_API_KEY?.trim();
+  const playerBlocks = useOddsProps ? [] : await Promise.all(games.map((g) => buildPlayerPropMarkets(g)));
   const merged = [...core, ...playerBlocks.flat()];
   const events = await fetchMlbOddsEvents();
   const priced = mergeFanDuelPrices(merged, games, events);
-  if (process.env.ODDS_API_KEY?.trim()) {
-    return priced.filter((m) => isSportsbookLineSource(m.source));
+  if (useOddsProps) {
+    const apiPlayer = buildPlayerPropsFromOddsEvents(events, games);
+    return [...priced, ...apiPlayer].filter((m) => isSportsbookLineSource(m.source));
   }
   return priced;
 }

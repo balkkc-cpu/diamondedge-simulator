@@ -34,7 +34,11 @@ export function fractionalKellyUnits(hitProb: number, americanOdds: number, bank
   return Math.min(1.5, Math.round(k * bankrollUnits * 4) / 4);
 }
 
-/** True when odds were merged from The Odds API (FanDuel / DraftKings / etc.), not the local seed model. */
+const NON_BOOK_SOURCES = new Set(["model", "mock", ""]);
+
+/** True when the line came from any sportsbook Odds API key (not our seed/mock numbers). source is bookmaker key like fanduel, draftkings, betmgm, etc. */
 export function isSportsbookLineSource(source: string): boolean {
-  return source === "fanduel" || source === "draftkings" || source === "betmgm";
+  if (!source || NON_BOOK_SOURCES.has(source)) return false;
+  if (source === "book") return false;
+  return true;
 }

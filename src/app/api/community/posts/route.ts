@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/sessionUser";
 import { prisma } from "@/lib/prisma";
 import { rateLimit } from "@/lib/rateLimit";
+import { notifyOwnerNewCommunityPost } from "@/lib/mail";
 
 const MAX_IMAGE_CHARS = 340_000;
 const MAX_CAPTION = 500;
@@ -64,6 +65,17 @@ export async function POST(req: NextRequest) {
       imageUrl: imageUrl || null,
       imageData: imageData || null
     }
+  });
+  const baseUrl =
+    process.env.NEXT_PUBLIC_BASE_URL?.trim() ||
+    `${req.nextUrl.protocol}//${req.nextUrl.host}`;
+  await notifyOwnerNewCommunityPost({
+    postId: post.id,
+    authorEmail: user.email,
+    authorLabel: user.displayName?.trim() || user.email.split("@")[0] || user.email,
+    caption: caption || null,
+    hasImage: Boolean(imageUrl || imageData),
+    baseUrl
   });
   return NextResponse.json({ ok: true, id: post.id });
 }

@@ -8,5 +8,10 @@ prisma/dev.db
 prisma/dev.db-journal
 mobile/.expo
 mobile/node_modules
+mobile/android
+mobile/ios
+mobile/dist
 .vercel
 .env*.local
+.env.db.deploy
+.env.vercel.pulled

@@ -1,19 +1,17 @@
 {
   "name": "diamondedge-mobile",
-  "version": "1.0.0",
   "private": true,
-  "main": "expo/AppEntry.js",
+  "version": "1.0.0",
+  "description": "Android wrapper for DiamondEdge (loads your live Vercel URL).",
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios"
+    "sync": "npx cap sync android",
+    "open": "npx cap open android"
   },
   "dependencies": {
-    "expo": "^51.0.23",
-    "expo-constants": "~16.0.2",
-    "expo-status-bar": "~1.12.1",
-    "react": "18.2.0",
-    "react-native": "0.74.5",
-    "react-native-webview": "^13.10.4"
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/core": "^6.2.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.1"
   }
 }
