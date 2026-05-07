@@ -7,6 +7,17 @@ import { GameCard, GameDetail, Market, PlayerCard } from "./types";
 const MLB_STATS_API = "https://statsapi.mlb.com/api/v1";
 const MLB_STATS_API_V11 = "https://statsapi.mlb.com/api/v1.1";
 
+/** MLB slate day should follow US Eastern time, not UTC day rollover. */
+function mlbDateStringEt(now = new Date()): string {
+  const dtf = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  return dtf.format(now);
+}
+
 async function safeJson(url: string, init?: RequestInit) {
   const res = await fetch(url, { ...init, next: { revalidate: 60 } });
   if (!res.ok) throw new Error(`Fetch failed: ${url}`);
@@ -98,7 +109,7 @@ function generateMarketsForGame(game: GameCard): Market[] {
 
 export async function getDailySchedule(): Promise<GameCard[]> {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = mlbDateStringEt();
     const data = await scheduleJson(`${MLB_STATS_API}/schedule?sportId=1&date=${today}&hydrate=team,probablePitcher`);
     const dates = data.dates?.[0]?.games ?? [];
     if (!dates.length) return mockGames;

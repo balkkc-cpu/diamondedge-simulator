@@ -5,8 +5,12 @@ import { LiveTrackerClient } from "./tracker-client";
 
 export default async function LiveTrackerPage() {
   const games = await getDailySchedule();
-  const firstId = games[0]?.id ?? "746791";
-  const label = games[0] ? `${games[0].awayTeam} @ ${games[0].homeTeam}` : "Select a game";
+  const preferred =
+    games.find((g) => /live|in progress/i.test(g.status)) ??
+    games.find((g) => /pre-?game|warmup|delayed/i.test(g.status)) ??
+    games[0];
+  const firstId = preferred?.id ?? "746791";
+  const label = preferred ? `${preferred.awayTeam} @ ${preferred.homeTeam}` : "Select a game";
 
   return (
     <main className="grid gap-6">
