@@ -142,9 +142,26 @@ const CORE_MARKETS =
 const PLAYER_MARKETS =
   "batter_hits,batter_home_runs,batter_home_runs_alternate,batter_total_bases,batter_rbis,batter_runs,pitcher_strikeouts,batter_walks";
 
+async function logOddsApiError(res: Response, tag: string): Promise<void> {
+  let body = "";
+  try {
+    body = (await res.text()).replace(/\s+/g, " ").slice(0, 260);
+  } catch {
+    body = "";
+  }
+  const remaining = res.headers.get("x-requests-remaining");
+  const used = res.headers.get("x-requests-used");
+  console.error(
+    `[odds-api:${tag}] status=${res.status} remaining=${remaining ?? "?"} used=${used ?? "?"} body=${body || "<empty>"}`
+  );
+}
+
 export async function fetchMlbOddsEvents(): Promise<unknown[]> {
   const key = process.env.ODDS_API_KEY;
-  if (!key) return [];
+  if (!key) {
+    console.warn("[odds-api] ODDS_API_KEY missing; using model prices.");
+    return [];
+  }
   const base =
     "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds" +
     `?apiKey=${encodeURIComponent(key)}&regions=us&oddsFormat=american&bookmakers=fanduel,draftkings`;
@@ -152,6 +169,7 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
   try {
     const res = await fetch(`${base}&markets=${allMarkets}`, { next: { revalidate: REVALIDATE_SEC } });
     if (res.ok) return (await res.json()) as unknown[];
+    await logOddsApiError(res, "combined");
   } catch {
     /* fall through */
   }
@@ -160,9 +178,15 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
       fetch(`${base}&markets=${CORE_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } }),
       fetch(`${base}&markets=${PLAYER_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } })
     ]);
+    if (!a.ok) await logOddsApiError(a, "core");
+    if (!b.ok) await logOddsApiError(b, "player");
     const ja = a.ok ? ((await a.json()) as unknown[]) : [];
     const jb = b.ok ? ((await b.json()) as unknown[]) : [];
-    return mergeEventsById([ja, jb]);
+    const merged = mergeEventsById([ja, jb]);
+    if (!merged.length) {
+      console.warn("[odds-api] no MLB events returned; using model prices.");
+    }
+    return merged;
   } catch {
     return [];
   }
