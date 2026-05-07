@@ -139,7 +139,9 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
   const merged = mergeFanDuelPrices([...base, ...player], games, events);
   // When sportsbook feed is configured, hide model-only player props so shown prices are real book lines.
   if (process.env.ODDS_API_KEY?.trim()) {
-    return merged.filter((m) => !m.marketType.startsWith("player_") || isSportsbookLineSource(m.source));
+    const filtered = merged.filter((m) => !m.marketType.startsWith("player_") || isSportsbookLineSource(m.source));
+    const hadAnyBookProps = filtered.some((m) => m.marketType.startsWith("player_"));
+    return hadAnyBookProps ? filtered : merged;
   }
   return merged;
 }
@@ -153,7 +155,9 @@ export async function getAllMarkets(): Promise<Market[]> {
   const events = await fetchMlbOddsEvents();
   const priced = mergeFanDuelPrices(merged, games, events);
   if (process.env.ODDS_API_KEY?.trim()) {
-    return priced.filter((m) => !m.marketType.startsWith("player_") || isSportsbookLineSource(m.source));
+    const filtered = priced.filter((m) => !m.marketType.startsWith("player_") || isSportsbookLineSource(m.source));
+    const hadAnyBookProps = filtered.some((m) => m.marketType.startsWith("player_"));
+    return hadAnyBookProps ? filtered : priced;
   }
   return priced;
 }
