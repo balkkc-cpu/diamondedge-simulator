@@ -9,3 +9,4 @@ prisma/dev.db-journal
 mobile/.expo
 mobile/node_modules
 .vercel
+.env*.local
