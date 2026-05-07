@@ -206,6 +206,9 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
   const baseAnyBook =
     "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds" +
     `?apiKey=${encodeURIComponent(key)}&regions=us&oddsFormat=american`;
+  const baseFeaturedWide =
+    "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds" +
+    `?apiKey=${encodeURIComponent(key)}&regions=us,us2,eu,uk,au&oddsFormat=american&markets=h2h,spreads,totals`;
   const allMarkets = `${CORE_MARKETS},${PLAYER_MARKETS}`;
   try {
     const res = await fetch(`${baseWithBooks}&markets=${allMarkets}`, { next: { revalidate: REVALIDATE_SEC } });
@@ -258,9 +261,22 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
         });
         return mergedAny;
       }
+      // Final fallback: featured markets only, broader regions.
+      const wide = await fetch(baseFeaturedWide, { next: { revalidate: REVALIDATE_SEC } });
+      if (!wide.ok) await logOddsApiError(wide, "featured-wide");
+      const wideEvents = wide.ok ? ((await wide.json()) as unknown[]) : [];
+      if (wideEvents.length) {
+        setOddsDebug({
+          status: "ok",
+          detail: `featured-wide fallback ok (${wideEvents.length} events)`,
+          remaining: wide.headers.get("x-requests-remaining") ?? undefined,
+          used: wide.headers.get("x-requests-used") ?? undefined
+        });
+        return wideEvents;
+      }
       setOddsDebug({
         status: "no_events",
-        detail: "split requests returned 0 merged events",
+        detail: "all fallbacks returned 0 events",
         remaining: a.headers.get("x-requests-remaining") ?? b.headers.get("x-requests-remaining") ?? undefined,
         used: a.headers.get("x-requests-used") ?? b.headers.get("x-requests-used") ?? undefined
       });
