@@ -11,7 +11,8 @@
     "start": "npx next start",
     "lint": "npx next lint",
     "db:push": "npx prisma db push",
-    "db:seed": "npx tsx prisma/seed.ts"
+    "db:seed": "npx tsx prisma/seed.ts",
+    "pwa:icons": "node scripts/gen-pwa-icons.mjs"
   },
   "dependencies": {
     "@prisma/client": "^5.16.2",
@@ -33,6 +34,7 @@
     "eslint-config-next": "^14.2.18",
     "postcss": "^8.5.10",
     "prisma": "^5.16.2",
+    "sharp": "^0.33.5",
     "tailwindcss": "^3.4.6",
     "tsx": "^4.16.5",
     "typescript": "^5.5.4"
