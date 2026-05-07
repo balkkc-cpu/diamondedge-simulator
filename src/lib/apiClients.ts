@@ -148,9 +148,9 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
   const player = await buildPlayerPropMarkets(game);
   const events = await fetchMlbOddsEvents();
   const merged = mergeFanDuelPrices([...base, ...player], games, events);
-  // Strict mode: with ODDS_API_KEY set, never show model-only player props.
+  // Strict mode: when ODDS_API_KEY is configured, only show sportsbook-sourced lines.
   if (process.env.ODDS_API_KEY?.trim()) {
-    return merged.filter((m) => !m.marketType.startsWith("player_") || isSportsbookLineSource(m.source));
+    return merged.filter((m) => isSportsbookLineSource(m.source));
   }
   return merged;
 }
@@ -164,7 +164,7 @@ export async function getAllMarkets(): Promise<Market[]> {
   const events = await fetchMlbOddsEvents();
   const priced = mergeFanDuelPrices(merged, games, events);
   if (process.env.ODDS_API_KEY?.trim()) {
-    return priced.filter((m) => !m.marketType.startsWith("player_") || isSportsbookLineSource(m.source));
+    return priced.filter((m) => isSportsbookLineSource(m.source));
   }
   return priced;
 }

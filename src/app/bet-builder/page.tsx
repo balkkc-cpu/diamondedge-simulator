@@ -116,7 +116,7 @@ export default function BetBuilderPage() {
               Player board defaults to per-player tabs; switch to stat columns if you prefer. Board prices merge FanDuel
               (then DraftKings if FD is missing) via The Odds API when{" "}
               <code className="text-slate-300">ODDS_API_KEY</code> is set — client refetch every 10
-              minutes. Simulation only — not a sportsbook.
+              minutes. With the key configured, only sportsbook-sourced odds are shown. Simulation only — not a sportsbook.
             </p>
           </div>
         </div>
