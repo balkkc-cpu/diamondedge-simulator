@@ -204,9 +204,16 @@ export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promi
         if (!isCoreGameLineType(marketType) && meta?.proposition === true) {
           marketType = "player_prop";
         }
-        const bookPropCode = meta ? bookPropCodeFromRundownDef(meta) : undefined;
-        const statKey = meta ? inferStatKeyFromRundownDef(meta) : undefined;
-        const pickKind = meta ? inferPickKindFromRundownDef(meta) : undefined;
+        const nameMeta = {
+          id: Number.isFinite(mid) ? mid : 0,
+          name: mkName,
+          proposition: Boolean(meta?.proposition),
+          short_description: meta?.short_description,
+          description: meta?.description
+        };
+        const bookPropCode = bookPropCodeFromRundownDef(meta ?? nameMeta);
+        const statKey = inferStatKeyFromRundownDef(meta ?? nameMeta);
+        const pickKind = inferPickKindFromRundownDef(meta ?? nameMeta);
         const participantGroups: Array<{ source: string; rows: any[] }> = [];
         if (Array.isArray(mk?.participants)) participantGroups.push({ source: "rundown", rows: mk.participants });
         const booksA: any[] = Array.isArray(mk?.books) ? mk.books : [];

@@ -4,7 +4,7 @@ import { isSportsbookLineSource } from "@/lib/odds";
 import { Market } from "@/lib/types";
 import { SlipBet } from "@/lib/types";
 
-const STAT_ORDER = ["hits", "runs", "rbi", "tb", "hrr", "hr", "walks", "k"] as const;
+const STAT_ORDER = ["hits", "runs", "rbi", "tb", "hrr", "hr", "walks", "k", "other"] as const;
 
 const STAT_HEADINGS: Record<string, string> = {
   hits: "Hits",
@@ -14,11 +14,17 @@ const STAT_HEADINGS: Record<string, string> = {
   hrr: "H + R + RBI",
   hr: "Home runs",
   walks: "Walks",
-  k: "Strikeouts"
+  k: "Strikeouts",
+  other: "Other props"
 };
 
+const KNOWN_STAT = new Set<string>(STAT_ORDER.filter((s) => s !== "other") as unknown as string[]);
+
 function statKeyOf(m: Market): string {
-  return m.statKey ?? m.marketType.replace(/^player_/, "") ?? "other";
+  if (m.statKey && KNOWN_STAT.has(m.statKey)) return m.statKey;
+  const tail = m.marketType.replace(/^player_/, "");
+  if (tail && tail !== "prop" && KNOWN_STAT.has(tail)) return tail;
+  return "other";
 }
 
 function playerNameOf(m: Market): string {
@@ -90,10 +96,7 @@ export function PlayerPropColumns({
           if (!list.length) return null;
           const rows = groupByPlayer(list);
           return (
-            <div
-              key={stat}
-              className="flex max-h-[min(78vh,900px)] flex-col overflow-hidden rounded-xl border border-slate-700/70 bg-gradient-to-b from-slate-900/95 to-slate-950 shadow-lg shadow-black/30"
-            >
+            <div key={stat} className="flex max-h-[min(78vh,900px)] flex-col overflow-hidden rounded-xl border border-slate-700/70 bg-gradient-to-b from-slate-900/95 to-slate-950 shadow-lg shadow-black/30">
               <div className="shrink-0 border-b border-slate-700/80 bg-slate-900/90 px-3 py-2 text-center">
                 <div className="text-[11px] font-bold uppercase tracking-widest text-sky-300/90">{STAT_HEADINGS[stat] ?? stat}</div>
               </div>
@@ -143,6 +146,13 @@ export function PlayerPropColumns({
   );
 }
 
+const GAME_LINE_LABEL: Record<string, string> = {
+  moneyline: "Moneyline",
+  runline: "Run line",
+  total: "Game total",
+  team_total: "Team total"
+};
+
 export function GameLinesRow({
   markets,
   onAdd
@@ -172,7 +182,7 @@ export function GameLinesRow({
             className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1.5 text-left text-xs font-medium text-slate-100 hover:border-indigo-500/50"
           >
             <span className="block text-slate-400">
-              {m.marketType}
+              {GAME_LINE_LABEL[m.marketType] ?? m.marketType.replace(/^rundown_/, "").replace(/_/g, " ")}
               {isSportsbookLineSource(m.source) ? (
                 <span className="ml-1 rounded bg-emerald-900/40 px-1 text-[9px] font-bold uppercase text-emerald-300">board</span>
               ) : null}

@@ -3,6 +3,7 @@ import { impliedProbabilityFromAmerican, isSportsbookLineSource } from "./odds";
 import { buildPlayerPropMarkets } from "./rosterProps";
 import { buildPlayerPropsFromOddsEvents, fetchMlbOddsEvents, mergeFanDuelPrices } from "./theOddsFanDuel";
 import { fetchRundownMarketsForToday } from "./theRundown";
+import { applyRundownRetailSlate } from "./retailBoard";
 import { GameCard, GameDetail, Market, PlayerCard } from "./types";
 
 const MLB_STATS_API = "https://statsapi.mlb.com/api/v1";
@@ -276,8 +277,8 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
   if (provider === "rundown") {
     const rundown = await fetchRundownMarketsForToday(games);
     const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
-    const byGame = sportsbook.filter((m) => m.gameId === gameId);
-    // Provider-only mode: no model injection.
+    const retail = applyRundownRetailSlate(sportsbook);
+    const byGame = retail.filter((m) => m.gameId === gameId);
     return byGame;
   }
   const game = games.find((g) => g.id === gameId);
@@ -306,8 +307,8 @@ export async function getAllMarkets(): Promise<Market[]> {
   if (provider === "rundown") {
     const games = await getDailySchedule();
     const rundown = await fetchRundownMarketsForToday(games);
-    // Provider-only mode: no model injection.
-    return rundown.filter((m) => isSportsbookLineSource(m.source));
+    const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
+    return applyRundownRetailSlate(sportsbook);
   }
 
   const games = await getDailySchedule();

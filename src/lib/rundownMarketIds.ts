@@ -66,7 +66,7 @@ export function bookPropCodeFromRundownDef(m: Pick<RundownMarketDef, "name" | "s
 
 export function inferStatKeyFromRundownDef(m: Pick<RundownMarketDef, "name" | "short_description" | "description">): StatKey | undefined {
   const blob = normRundownText(m.name, m.short_description, m.description);
-  if (/\bdouble\s*double|\btriple\s*double\b|yes|no\b/.test(blob)) return undefined;
+  if (/\bdouble\s*double|\btriple\s*double\b/i.test(blob)) return undefined;
   if (/h\+r|hits\s*\+\s*runs\s*\+\s*rbi|r \+ h|combined/.test(blob)) return "hrr";
   if (/\bhome\s*run|\bhr\b|homer/.test(blob)) return "hr";
   if (/\bhit\b/.test(blob) && !/allowed/.test(blob)) return "hits";
