@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAllMarkets, getDailySchedule, getInjuries, getWeatherFallback } from "@/lib/apiClients";
+import { getOddsDebugState } from "@/lib/theOddsFanDuel";
 import { rateLimit } from "@/lib/rateLimit";
 
 export async function GET(req: Request) {
@@ -18,6 +19,7 @@ export async function GET(req: Request) {
     games,
     allMarkets,
     injuries,
-    weather
+    weather,
+    oddsDebug: getOddsDebugState()
   });
 }

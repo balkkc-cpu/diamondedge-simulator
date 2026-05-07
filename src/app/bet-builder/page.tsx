@@ -6,6 +6,7 @@ import { GameLinesRow, PlayerPropColumns } from "@/components/PlayerPropColumns"
 import { PlayerTabsBoard } from "@/components/PlayerTabsBoard";
 import { useBetStore } from "@/store/betStore";
 import { GameCard, Market, SlipBet } from "@/lib/types";
+import type { OddsDebugState } from "@/lib/theOddsFanDuel";
 
 function isPlayerMarket(m: Market) {
   return m.marketType.startsWith("player_");
@@ -22,7 +23,7 @@ export default function BetBuilderPage() {
     urlGameRef.current = gameFromUrl();
   }
 
-  const [data, setData] = useState<{ games: GameCard[]; allMarkets: Market[] } | null>(null);
+  const [data, setData] = useState<{ games: GameCard[]; allMarkets: Market[]; oddsDebug?: OddsDebugState } | null>(null);
   const [gameId, setGameId] = useState<string>("mock-game-001");
   const [marketFilter, setMarketFilter] = useState<"all" | "lines" | "players_tabs" | "players_columns">("players_tabs");
   const [running, setRunning] = useState(false);
@@ -68,6 +69,17 @@ export default function BetBuilderPage() {
   const forGame = useMemo(() => (data?.allMarkets ?? []).filter((m) => m.gameId === gameId), [data, gameId]);
   const lineMarkets = useMemo(() => forGame.filter((m) => !isPlayerMarket(m)), [forGame]);
   const playerMarkets = useMemo(() => forGame.filter((m) => isPlayerMarket(m)), [forGame]);
+  const oddsDebug = data?.oddsDebug;
+
+  const oddsBadge = useMemo(() => {
+    if (!oddsDebug) return null;
+    if (oddsDebug.status === "ok") return { label: "LIVE ODDS OK", tone: "text-emerald-300 border-emerald-700/50 bg-emerald-950/30" };
+    if (oddsDebug.status === "missing_key") return { label: "NO ODDS KEY", tone: "text-amber-300 border-amber-700/50 bg-amber-950/30" };
+    if (oddsDebug.status === "http_error") return { label: `ODDS API ERROR ${oddsDebug.httpStatus ?? ""}`.trim(), tone: "text-rose-300 border-rose-700/50 bg-rose-950/30" };
+    if (oddsDebug.status === "no_events") return { label: "NO BOOK LINES RETURNED", tone: "text-amber-300 border-amber-700/50 bg-amber-950/30" };
+    if (oddsDebug.status === "exception") return { label: "ODDS FETCH EXCEPTION", tone: "text-rose-300 border-rose-700/50 bg-rose-950/30" };
+    return { label: "ODDS STATUS UNKNOWN", tone: "text-slate-300 border-slate-700/50 bg-slate-900/40" };
+  }, [oddsDebug]);
 
   async function saveSlipToServer() {
     setSaveMsg("");
@@ -118,6 +130,13 @@ export default function BetBuilderPage() {
               <code className="text-slate-300">ODDS_API_KEY</code> is set — client refetch every 10
               minutes. With the key configured, only sportsbook-sourced odds are shown. Simulation only — not a sportsbook.
             </p>
+            {oddsBadge ? (
+              <div className={`mt-2 inline-flex items-center gap-2 rounded-md border px-2 py-1 text-[11px] ${oddsBadge.tone}`}>
+                <span className="font-semibold">{oddsBadge.label}</span>
+                {typeof oddsDebug?.remaining === "string" ? <span>remaining: {oddsDebug.remaining}</span> : null}
+                {oddsDebug?.detail ? <span className="text-slate-300/90">· {oddsDebug.detail}</span> : null}
+              </div>
+            ) : null}
           </div>
         </div>
 

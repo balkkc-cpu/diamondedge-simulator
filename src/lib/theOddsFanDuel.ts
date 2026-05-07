@@ -9,6 +9,28 @@ import { GameCard, Market } from "./types";
 const REVALIDATE_SEC = 600;
 
 type OddsOutcome = { name?: string; description?: string; point?: number; price?: number };
+export type OddsDebugState = {
+  status: "idle" | "ok" | "missing_key" | "http_error" | "no_events" | "exception";
+  detail?: string;
+  httpStatus?: number;
+  remaining?: string;
+  used?: string;
+  updatedAt: string;
+};
+
+let lastOddsDebug: OddsDebugState = {
+  status: "idle",
+  detail: "No odds request yet",
+  updatedAt: new Date(0).toISOString()
+};
+
+function setOddsDebug(patch: Omit<OddsDebugState, "updatedAt">) {
+  lastOddsDebug = { ...patch, updatedAt: new Date().toISOString() };
+}
+
+export function getOddsDebugState(): OddsDebugState {
+  return lastOddsDebug;
+}
 
 function normTeam(s: string): string {
   return s.trim().toLowerCase().replace(/\./g, "").replace(/\s+/g, " ");
@@ -156,6 +178,13 @@ async function logOddsApiError(res: Response, tag: string): Promise<void> {
   }
   const remaining = res.headers.get("x-requests-remaining");
   const used = res.headers.get("x-requests-used");
+  setOddsDebug({
+    status: "http_error",
+    detail: `${tag}: ${body || "HTTP error"}`,
+    httpStatus: res.status,
+    remaining: remaining ?? undefined,
+    used: used ?? undefined
+  });
   console.error(
     `[odds-api:${tag}] status=${res.status} remaining=${remaining ?? "?"} used=${used ?? "?"} body=${body || "<empty>"}`
   );
@@ -164,6 +193,10 @@ async function logOddsApiError(res: Response, tag: string): Promise<void> {
 export async function fetchMlbOddsEvents(): Promise<unknown[]> {
   const key = process.env.ODDS_API_KEY;
   if (!key) {
+    setOddsDebug({
+      status: "missing_key",
+      detail: "ODDS_API_KEY is not set"
+    });
     console.warn("[odds-api] ODDS_API_KEY missing; using model prices.");
     return [];
   }
@@ -173,9 +206,22 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
   const allMarkets = `${CORE_MARKETS},${PLAYER_MARKETS}`;
   try {
     const res = await fetch(`${base}&markets=${allMarkets}`, { next: { revalidate: REVALIDATE_SEC } });
-    if (res.ok) return (await res.json()) as unknown[];
+    if (res.ok) {
+      const out = (await res.json()) as unknown[];
+      setOddsDebug({
+        status: out.length ? "ok" : "no_events",
+        detail: out.length ? `combined request ok (${out.length} events)` : "combined request returned 0 events",
+        remaining: res.headers.get("x-requests-remaining") ?? undefined,
+        used: res.headers.get("x-requests-used") ?? undefined
+      });
+      return out;
+    }
     await logOddsApiError(res, "combined");
-  } catch {
+  } catch (e) {
+    setOddsDebug({
+      status: "exception",
+      detail: `combined fetch exception: ${e instanceof Error ? e.message : String(e)}`
+    });
     /* fall through */
   }
   try {
@@ -189,10 +235,27 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
     const jb = b.ok ? ((await b.json()) as unknown[]) : [];
     const merged = mergeEventsById([ja, jb]);
     if (!merged.length) {
+      setOddsDebug({
+        status: "no_events",
+        detail: "split requests returned 0 merged events",
+        remaining: a.headers.get("x-requests-remaining") ?? b.headers.get("x-requests-remaining") ?? undefined,
+        used: a.headers.get("x-requests-used") ?? b.headers.get("x-requests-used") ?? undefined
+      });
       console.warn("[odds-api] no MLB events returned; using model prices.");
+    } else {
+      setOddsDebug({
+        status: "ok",
+        detail: `split requests ok (${merged.length} merged events)`,
+        remaining: a.headers.get("x-requests-remaining") ?? b.headers.get("x-requests-remaining") ?? undefined,
+        used: a.headers.get("x-requests-used") ?? b.headers.get("x-requests-used") ?? undefined
+      });
     }
     return merged;
-  } catch {
+  } catch (e) {
+    setOddsDebug({
+      status: "exception",
+      detail: `split fetch exception: ${e instanceof Error ? e.message : String(e)}`
+    });
     return [];
   }
 }
