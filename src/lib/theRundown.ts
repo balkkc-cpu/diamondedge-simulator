@@ -128,19 +128,22 @@ function isCoreGameLineType(t: string): boolean {
 /** Rundown MLB prop markets are often named `hits` / `batter_*` / `pitcher_*` without the word "player". */
 function looksLikeRundownPlayerPropName(name: string): boolean {
   const n = name.toLowerCase();
+  if (/\b(team\s*total|spread|moneyline|money\s*line|game\s*total|run\s*line|runline|handicap|puck\s*line|alternate)\b/.test(n)) {
+    return false;
+  }
   if (n.includes("player")) return true;
   return (
-    /\b(batter|pitcher|strike\s*out|strikeouts?|home\s*run|\bhr\b|\bhits?\b|\brbi\b|\bruns?\b|walk|stolen|singles?|doubles?|triples?|earned|outs?\s*recorded|allowed|pickoff|plate\s*appearance|\bat\s*bats?\b|\bab\b)/.test(
+    /\b(batter|pitcher|strike\s*out|strikeouts?|home\s*run|\bhr\b|\bhits\b|\brbis?\b|\bwalks\b|stolen|singles?|doubles?|triples?|earned|outs?\s*recorded|allowed|pickoff|plate\s*appearance|\bat\s*bats?\b|\bab\b)/.test(
       n
-    ) &&
-    !/\b(team\s*total|spread|moneyline|money\s*line|game\s*total)\b/.test(n)
+    ) ||
+    /\b(runs\s+scored|player\s+runs|total\s*bases|\btb\b)\b/.test(n)
   );
 }
 
 function marketTypeFromName(name: string): string {
   const n = name.toLowerCase();
   if (n.includes("moneyline") || n.includes("money line")) return "moneyline";
-  if (n.includes("spread") || n.includes("run line")) return "runline";
+  if (/\b(alternate\s+)?(spread|handicap|run\s*line|puck\s*line)\b/.test(n) || n.includes("runline")) return "runline";
   if (n.includes("team total")) return "team_total";
   if (n.includes("total base") || /\btotal\s*bases\b/.test(n)) return "player_prop";
   if (n.includes("total")) return "total";
@@ -188,7 +191,7 @@ function ingestRundownEvents(
       const mid = Number(mk?.market_id);
       const meta = Number.isFinite(mid) ? metaByMarketId.get(mid) : undefined;
       let marketType = marketTypeFromName(mkName);
-      if (!isCoreGameLineType(marketType) && (meta?.proposition === true || looksLikeRundownPlayerPropName(mkName))) {
+      if (!isCoreGameLineType(marketType) && looksLikeRundownPlayerPropName(mkName)) {
         marketType = "player_prop";
       }
       const nameMeta = {

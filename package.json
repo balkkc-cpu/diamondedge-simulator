@@ -12,7 +12,8 @@
     "lint": "npx next lint",
     "db:push": "npx prisma db push",
     "db:seed": "npx tsx prisma/seed.ts",
-    "pwa:icons": "node scripts/gen-pwa-icons.mjs"
+    "pwa:icons": "node scripts/gen-pwa-icons.mjs",
+    "verify:books": "node scripts/verify-books-env.mjs"
   },
   "dependencies": {
     "@prisma/client": "^5.16.2",

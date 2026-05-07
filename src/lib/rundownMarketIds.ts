@@ -72,7 +72,7 @@ export function inferStatKeyFromRundownDef(m: Pick<RundownMarketDef, "name" | "s
   if (/\bhit\b/.test(blob) && !/allowed/.test(blob)) return "hits";
   if (/\btotal\s*bases|\btb\b/.test(blob)) return "tb";
   if (/\brbi\b/.test(blob)) return "rbi";
-  if (/\brun\b/.test(blob) && !/earned|pitch/.test(blob)) return "runs";
+  if (/\brun\b/.test(blob) && !/earned|pitch|run\s*line|runline|spread|handicap/.test(blob)) return "runs";
   if (/\bwalks?\b|\bbb\b/.test(blob) && !/pitcher/.test(blob)) return "walks";
   if (/\bstrike|^\s*k\s|pitcher.*k\b|\bks\b|strikeouts?/.test(blob)) return "k";
   return undefined;
@@ -188,8 +188,10 @@ export async function buildRundownMarketIdsForFetch(params: {
   function catalogRowLooksLikePlayerProp(m: RundownMarketDef): boolean {
     if (m.proposition) return true;
     const blob = normRundownText(m.name, m.short_description, m.description);
-    if (/\b(moneyline|spread|run line|total|team total)\b/i.test(blob)) return false;
-    return /\b(batter|pitcher|player|strikeout|strike\s*out|home\s*run|\bhr\b|\bhits?\b|\brbi\b|\bruns\b|walk|stolen|single|double|triple|outs|allowed|pickoff|plate appearance|\bat\s*bats?\b|\bab\b|to\s*record|double\s*double|triple\s*double)/i.test(
+    if (/\b(moneyline|spread|run\s*line|runline|handicap|puck\s*line|alternate|game\s*total|team\s*total|total\s*\(over)/i.test(blob)) {
+      return false;
+    }
+    return /\b(batter|pitcher|player|strikeout|strike\s*out|home\s*run|\bhr\b|\bhits\b|\brbis?\b|\bwalks\b|stolen|singles?|doubles?|triples?|outs|allowed|pickoff|plate appearance|\bat\s*bats?\b|\bab\b|to\s*record|double\s*double|triple\s*double|runs\s+scored|total\s*bases|\btb\b)/i.test(
       blob
     );
   }

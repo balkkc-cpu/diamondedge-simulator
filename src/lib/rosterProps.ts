@@ -1,3 +1,4 @@
+import { isPlayerPropMarketType } from "./odds";
 import { GameCard, Market } from "./types";
 import { HITTER_MATRIX, PITCHER_MATRIX, PickKind, StatKey } from "./playerPropCatalog";
 
@@ -247,4 +248,98 @@ export async function buildPlayerPropMarkets(game: GameCard & { homeTeamId?: num
   });
 
   return markets;
+}
+
+function normRosterPersonName(s: string): string {
+  return s.trim().toLowerCase().replace(/\./g, "").replace(/\s+/g, " ");
+}
+
+/** Active MLB hitters + pitchers for both clubs (normalized full names). */
+export async function activeRosterNormalizedNamesForGame(game: GameCard): Promise<Set<string>> {
+  const hid = game.homeTeamId;
+  const aid = game.awayTeamId;
+  if (!hid || !aid) return new Set();
+  const [hh, ah, hp, ap] = await Promise.all([
+    getHitterNamesForTeam(hid),
+    getHitterNamesForTeam(aid),
+    getPitcherNamesForTeam(hid),
+    getPitcherNamesForTeam(aid)
+  ]);
+  const out = new Set<string>();
+  for (const n of [...hh, ...ah, ...hp, ...ap]) out.add(normRosterPersonName(n));
+  return out;
+}
+
+/** True for Over/Under numeric lines, HR Yes/No, or N+ tier stat picks (not team run lines). */
+export function playerPropSelectionLooksStatBased(selection: string): boolean {
+  const s = selection.toLowerCase();
+  if (/\(yes\)|\(no\)/.test(s)) return true;
+  if ((/\bover\b/.test(s) || /\bunder\b/.test(s)) && /\d/.test(s)) return true;
+  if (/\d\s*\+\s/.test(s)) return true;
+  return false;
+}
+
+function isTeamLabelAsPlayer(playerName: string | undefined, game: GameCard): boolean {
+  if (!playerName?.trim()) return true;
+  const p = normRosterPersonName(playerName);
+  return p === normRosterPersonName(game.homeTeam) || p === normRosterPersonName(game.awayTeam);
+}
+
+function rosterContainsPlayerLabel(label: string | undefined, roster: Set<string>): boolean {
+  if (!label?.trim()) return false;
+  const a = normRosterPersonName(label);
+  if (roster.has(a)) return true;
+  const parts = a.split(" ").filter(Boolean);
+  if (parts.length < 2) return false;
+  const last = parts[parts.length - 1]!;
+  const initial = parts[0]![0];
+  for (const r of roster) {
+    const rb = r.split(" ").filter(Boolean);
+    if (rb.length < 2) continue;
+    if (rb[rb.length - 1] === last && rb[0]![0] === initial) return true;
+  }
+  return false;
+}
+
+function isRundownAffiliateSource(source: string): boolean {
+  return /^rundown:/i.test(String(source ?? ""));
+}
+
+/**
+ * Removes Rundown markets misclassified as player props (e.g. team alternate run lines).
+ * Keeps only rows whose `playerName` matches an active roster name for that slate game
+ * and whose selection looks like a stat prop (O/U, Yes/No HR, N+ tier).
+ */
+export async function filterRundownMislabeledPlayerProps(markets: Market[], games: GameCard[]): Promise<Market[]> {
+  const gameById = new Map(games.map((g) => [g.id, g]));
+  const rosterPromises = new Map<string, Promise<Set<string>>>();
+
+  const rosterFor = (gameId: string): Promise<Set<string>> => {
+    const g = gameById.get(gameId);
+    if (!g) return Promise.resolve(new Set());
+    if (!rosterPromises.has(gameId)) rosterPromises.set(gameId, activeRosterNormalizedNamesForGame(g));
+    return rosterPromises.get(gameId)!;
+  };
+
+  const out: Market[] = [];
+  for (const m of markets) {
+    if (!isPlayerPropMarketType(m.marketType)) {
+      out.push(m);
+      continue;
+    }
+    if (!isRundownAffiliateSource(m.source)) {
+      out.push(m);
+      continue;
+    }
+    const game = gameById.get(m.gameId);
+    if (!game) continue;
+    const roster = await rosterFor(m.gameId);
+    if (!roster.size) continue;
+    if (isTeamLabelAsPlayer(m.playerName, game)) continue;
+    if (!rosterContainsPlayerLabel(m.playerName, roster)) continue;
+    if (!m.statKey) continue;
+    if (!playerPropSelectionLooksStatBased(m.selection)) continue;
+    out.push(m);
+  }
+  return out;
 }

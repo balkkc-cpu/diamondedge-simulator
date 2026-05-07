@@ -1,14 +1,12 @@
 /**
  * Sportsbook lines via The Odds API — requires ODDS_API_KEY.
  * Prefers FanDuel, then DraftKings when FanDuel is missing for an event.
- * Cached 10 minutes via `next: { revalidate: 600 }` on fetch.
+ * Cache TTL from `oddsApiRevalidateSeconds()` (default 24h) to limit API usage — set ODDS_CACHE_SECONDS to override.
  */
 
-import { isPlayerPropMarketType } from "./odds";
+import { isPlayerPropMarketType, oddsApiRevalidateSeconds } from "./odds";
 import { GameCard, Market } from "./types";
 import { HITTER_MATRIX, PITCHER_MATRIX, type PickKind, type StatKey } from "./playerPropCatalog";
-
-const REVALIDATE_SEC = 600;
 
 type OddsOutcome = { name?: string; description?: string; point?: number; price?: number };
 export type OddsDebugState = {
@@ -294,6 +292,107 @@ export function buildPlayerPropsFromOddsEvents(events: unknown[], games: GameCar
   return rows;
 }
 
+const STAT_TO_ODDS_MARKET: Record<StatKey, string> = {
+  hits: "batter_hits",
+  runs: "batter_runs_scored",
+  rbi: "batter_rbis",
+  tb: "batter_total_bases",
+  hrr: "batter_hits_runs_rbis",
+  hr: "batter_home_runs",
+  walks: "batter_walks",
+  k: "pitcher_strikeouts"
+};
+
+function statKeyToOddsMarketKey(stat: StatKey): string {
+  return STAT_TO_ODDS_MARKET[stat] ?? "batter_hits";
+}
+
+function normTeamLabel(s: string): string {
+  return s.trim().toLowerCase().replace(/\./g, "").replace(/\s+/g, " ");
+}
+
+/**
+ * True when a Rundown row can be mapped into The Odds API `bookmakers[].markets[].outcomes[]` shape
+ * (stat O/U or HR yes/no) — excludes team alt run / spread lines.
+ */
+export function isRundownMarketAdaptableToOddsLayout(m: Market, game: GameCard | undefined): boolean {
+  if (!isPlayerPropMarketType(m.marketType)) return false;
+  if (!/^rundown:/i.test(String(m.source))) return false;
+  if (!m.statKey) return false;
+  const low = m.selection.toLowerCase();
+  const hasOu = /\bover\b|\bunder\b/.test(low);
+  const hasHrYn =
+    m.statKey === "hr" && (/\(yes\)|\(no\)/.test(low) || (/\byes\b/.test(low) && !/\bover\b/.test(low)));
+  if (!hasOu && !hasHrYn) return false;
+  const pn = String(m.playerName ?? "").trim();
+  if (!pn || pn.split(/\s+/).filter(Boolean).length < 2) return false;
+  if (game) {
+    const pnorm = normTeamLabel(pn);
+    if (pnorm === normTeamLabel(game.homeTeam) || pnorm === normTeamLabel(game.awayTeam)) return false;
+  }
+  return true;
+}
+
+function parseRundownRowToOddsOutcome(m: Market): OddsOutcome | null {
+  if (typeof m.american !== "number" || !Number.isFinite(m.american)) return null;
+  const desc = String(m.playerName ?? "").trim();
+  if (!desc) return null;
+  const low = m.selection.toLowerCase();
+  if (m.statKey === "hr" && (/\(yes\)|\(no\)/.test(low) || (/\byes\b/.test(low) && !/\bover\b/.test(low)))) {
+    const isNo = /\(no\)/.test(low) || /\bno\b/.test(low);
+    const isYes = /\(yes\)/.test(low) || (/\byes\b/.test(low) && !isNo);
+    if (!isYes && !isNo) return null;
+    return { name: isYes ? "yes" : "no", description: desc, price: m.american };
+  }
+  if (!/\bover\b/.test(low) && !/\bunder\b/.test(low)) return null;
+  const nm = /\bunder\b/.test(low) ? "under" : "over";
+  const pt = m.line;
+  if (pt == null || !Number.isFinite(Number(pt))) return null;
+  return { name: nm, description: desc, point: Number(pt), price: m.american };
+}
+
+/**
+ * Re-shape Rundown `Market[]` into synthetic Odds API event objects so {@link buildPlayerPropsFromOddsEvents}
+ * can build the same `player_*` rows without billing The Odds API (Rundown key only).
+ */
+export function rundownMarketsToSyntheticOddsEvents(markets: Market[], games: GameCard[]): unknown[] {
+  type Slot = { home_team: string; away_team: string; books: Map<string, Map<string, OddsOutcome[]>> };
+  const byEvent = new Map<string, Slot>();
+
+  for (const m of markets) {
+    const game = games.find((g) => g.id === m.gameId);
+    if (!game || !isRundownMarketAdaptableToOddsLayout(m, game)) continue;
+    const o = parseRundownRowToOddsOutcome(m);
+    if (!o?.description) continue;
+    let slot = byEvent.get(m.gameId);
+    if (!slot) {
+      slot = { home_team: game.homeTeam, away_team: game.awayTeam, books: new Map() };
+      byEvent.set(m.gameId, slot);
+    }
+    const bookKey = String(m.source).toLowerCase().replace(/:/g, "_");
+    const mk = statKeyToOddsMarketKey(m.statKey!);
+    const mkMap = slot.books.get(bookKey) ?? new Map<string, OddsOutcome[]>();
+    if (!slot.books.has(bookKey)) slot.books.set(bookKey, mkMap);
+    const arr = mkMap.get(mk) ?? [];
+    arr.push(o);
+    mkMap.set(mk, arr);
+  }
+
+  return [...byEvent.entries()].map(([id, slot]) => ({
+    id,
+    home_team: slot.home_team,
+    away_team: slot.away_team,
+    sport_key: "baseball_mlb",
+    bookmakers: [...slot.books.entries()].map(([bk, mkMap]) => ({
+      key: bk,
+      markets: [...mkMap.entries()].map(([marketKey, outcomes]) => ({
+        key: marketKey,
+        outcomes
+      }))
+    }))
+  }));
+}
+
 function idSlug(s: string, max = 36): string {
   return s.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, max);
 }
@@ -311,7 +410,7 @@ const PLAYER_MARKETS =
   "batter_hits,batter_hits_alternate,batter_home_runs,batter_home_runs_alternate,batter_total_bases,batter_total_bases_alternate,batter_rbis,batter_rbis_alternate,batter_runs_scored,batter_runs_scored_alternate,batter_hits_runs_rbis,batter_hits_runs_rbis_alternate,pitcher_strikeouts,pitcher_strikeouts_alternate,batter_walks,batter_walks_alternate";
 
 const MLB_NONFEATURED_MARKETS_COMBINED = `${EXTENDED_CORE_MARKETS},${PLAYER_MARKETS}`;
-const LAST_GOOD_TTL_MS = 1000 * 60 * 60 * 6; // 6h stale-while-provider-down
+const LAST_GOOD_TTL_MS = 1000 * 60 * 60 * 24; // 24h stale-while-provider-down (align with long cache)
 let lastGoodMlbEvents: { events: unknown[]; at: number } | null = null;
 let cachedMlbSportKey: { key: string; at: number } | null = null;
 
@@ -319,6 +418,13 @@ let cachedMlbSportKey: { key: string; at: number } | null = null;
  * Bulk /baseball_mlb/odds only accepts featured markets. Player + alternate props are on
  * GET /events/{eventId}/odds (multiple markets/regions billed per Odds API usage rules).
  */
+const DEFAULT_EVENT_BOOKMAKERS = "fanduel,draftkings,betmgm";
+
+function eventOddsBookmakersParam(): string {
+  const raw = process.env.ODDS_EVENT_BOOKMAKERS?.trim();
+  return encodeURIComponent(raw && raw.length > 0 ? raw : DEFAULT_EVENT_BOOKMAKERS);
+}
+
 async function fetchSingleEventExtraOdds(
   apiKey: string,
   sportKey: string,
@@ -328,9 +434,9 @@ async function fetchSingleEventExtraOdds(
 ): Promise<unknown | null> {
   let q =
     `apiKey=${encodeURIComponent(apiKey)}&regions=${encodeURIComponent(EVENT_REGIONS)}&oddsFormat=american&markets=${encodeURIComponent(markets)}`;
-  if (books) q += "&bookmakers=fanduel,draftkings";
+  if (books) q += `&bookmakers=${eventOddsBookmakersParam()}`;
   const url = `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(sportKey)}/events/${encodeURIComponent(eventId)}/odds?${q}`;
-  const res = await fetch(url, { next: { revalidate: REVALIDATE_SEC } });
+  const res = await fetch(url, { next: { revalidate: oddsApiRevalidateSeconds() } });
   if (!res.ok) return null;
   try {
     const j = (await res.json()) as Record<string, unknown>;
@@ -344,7 +450,7 @@ async function fetchSingleEventMarketKeys(apiKey: string, sportKey: string, even
   const url =
     `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(sportKey)}/events/${encodeURIComponent(eventId)}/markets` +
     `?apiKey=${encodeURIComponent(apiKey)}&regions=${encodeURIComponent(EVENT_REGIONS)}`;
-  const res = await fetch(url, { next: { revalidate: REVALIDATE_SEC } });
+  const res = await fetch(url, { next: { revalidate: oddsApiRevalidateSeconds() } });
   if (!res.ok) return [];
   const payload = (await res.json()) as { bookmakers?: Array<{ markets?: Array<{ key?: string }> }> };
   const keys = new Set<string>();
@@ -369,18 +475,18 @@ async function fetchSingleEventMarketKeys(apiKey: string, sportKey: string, even
 
 async function fetchEventListBase(apiKey: string, sportKey: string): Promise<Array<Record<string, unknown>>> {
   const url = `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(sportKey)}/events?apiKey=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, { next: { revalidate: REVALIDATE_SEC } });
+  const res = await fetch(url, { next: { revalidate: oddsApiRevalidateSeconds() } });
   if (!res.ok) return [];
   const out = (await res.json()) as unknown[];
   return Array.isArray(out) ? (out as Array<Record<string, unknown>>) : [];
 }
 
 async function resolveMlbSportKey(apiKey: string): Promise<string> {
-  if (cachedMlbSportKey && Date.now() - cachedMlbSportKey.at < 1000 * 60 * 60) return cachedMlbSportKey.key;
+  if (cachedMlbSportKey && Date.now() - cachedMlbSportKey.at < oddsApiRevalidateSeconds() * 1000) return cachedMlbSportKey.key;
   const fallback = "baseball_mlb";
   try {
     const res = await fetch(`https://api.the-odds-api.com/v4/sports?apiKey=${encodeURIComponent(apiKey)}`, {
-      next: { revalidate: REVALIDATE_SEC }
+      next: { revalidate: oddsApiRevalidateSeconds() }
     });
     if (!res.ok) return fallback;
     const sports = (await res.json()) as Array<{ key?: string; active?: boolean }>;
@@ -406,7 +512,7 @@ async function resolveMlbSportKey(apiKey: string): Promise<string> {
 async function recoverEventsFromEventOddsEndpoint(apiKey: string, sportKey: string): Promise<unknown[]> {
   const base = await fetchEventListBase(apiKey, sportKey);
   if (!base.length) return [];
-  const maxRaw = Number(process.env.MLB_EVENT_RECOVERY_MAX ?? "18");
+  const maxRaw = Number(process.env.MLB_EVENT_RECOVERY_MAX ?? "8");
   const maxEvents = Math.max(1, Math.min(Number.isFinite(maxRaw) ? maxRaw : 18, base.length));
   const ids = base.slice(0, maxEvents);
 
@@ -425,7 +531,7 @@ async function recoverEventsFromUpcomingOdds(apiKey: string): Promise<unknown[]>
   const base =
     "https://api.the-odds-api.com/v4/sports/upcoming/odds" +
     `?apiKey=${encodeURIComponent(apiKey)}&regions=${encodeURIComponent(LIVE_REGIONS)}&oddsFormat=american&markets=${FEATURED_MARKETS}`;
-  const res = await fetch(base, { next: { revalidate: REVALIDATE_SEC } });
+  const res = await fetch(base, { next: { revalidate: oddsApiRevalidateSeconds() } });
   if (!res.ok) return [];
   const out = (await res.json()) as Array<Record<string, unknown>>;
   if (!Array.isArray(out) || !out.length) return [];
@@ -468,9 +574,9 @@ async function mergeNonFeaturedForOneEvent(apiKey: string, sportKey: string, ev:
 
 async function enrichMlbEventsWithPerEventOdds(apiKey: string, sportKey: string, events: unknown[]): Promise<unknown[]> {
   if (!events.length) return events;
-  const maxRaw = Number(process.env.MLB_EVENT_ODDS_MAX ?? "28");
-  const maxMerge = Math.max(1, Math.min(Number.isFinite(maxRaw) ? maxRaw : 28, events.length));
-  const concRaw = Number(process.env.MLB_EVENT_ODDS_CONCURRENCY ?? "6");
+  const maxRaw = Number(process.env.MLB_EVENT_ODDS_MAX ?? "12");
+  const maxMerge = Math.max(1, Math.min(Number.isFinite(maxRaw) ? maxRaw : 12, events.length));
+  const concRaw = Number(process.env.MLB_EVENT_ODDS_CONCURRENCY ?? "3");
   const concurrency = Math.max(1, Math.min(Number.isFinite(concRaw) ? concRaw : 6, maxMerge));
 
   const head = events.slice(0, maxMerge).map((e) => e as Record<string, unknown>);
@@ -528,7 +634,7 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
     `?apiKey=${encodeURIComponent(key)}&regions=${encodeURIComponent(LIVE_REGIONS)}&oddsFormat=american&markets=${FEATURED_MARKETS}`;
   async function loadFeaturedFeatured(): Promise<unknown[]> {
     try {
-      const res = await fetch(`${baseWithBooks}&markets=${FEATURED_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } });
+      const res = await fetch(`${baseWithBooks}&markets=${FEATURED_MARKETS}`, { next: { revalidate: oddsApiRevalidateSeconds() } });
       if (res.ok) {
         const out = (await res.json()) as unknown[];
         if (out.length)
@@ -553,7 +659,7 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
   let events = await loadFeaturedFeatured();
   if (!events.length) {
     try {
-      const res = await fetch(`${baseAnyBook}&markets=${FEATURED_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } });
+      const res = await fetch(`${baseAnyBook}&markets=${FEATURED_MARKETS}`, { next: { revalidate: oddsApiRevalidateSeconds() } });
       if (res.ok) {
         events = (await res.json()) as unknown[];
         if (events.length) {
@@ -575,7 +681,7 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
 
   if (!events.length) {
     try {
-      const wide = await fetch(baseFeaturedWide, { next: { revalidate: REVALIDATE_SEC } });
+      const wide = await fetch(baseFeaturedWide, { next: { revalidate: oddsApiRevalidateSeconds() } });
       if (wide.ok) {
         events = (await wide.json()) as unknown[];
         if (events.length)

@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
+import { oddsApiRevalidateSeconds } from "@/lib/odds";
 
 export const runtime = "nodejs";
+
+const oddsFetchInit = { next: { revalidate: oddsApiRevalidateSeconds() } } as const;
 
 export async function GET() {
   const key = process.env.ODDS_API_KEY?.trim();
   if (!key) return NextResponse.json({ ok: false, error: "ODDS_API_KEY missing" }, { status: 500 });
 
   const baseSports = `https://api.the-odds-api.com/v4/sports?apiKey=${encodeURIComponent(key)}`;
-  const sportsRes = await fetch(baseSports, { cache: "no-store" });
+  const sportsRes = await fetch(baseSports, oddsFetchInit);
   const sportsTxt = await sportsRes.text();
   let sports: Array<{ key?: string; active?: boolean }> = [];
   try {
@@ -33,7 +36,7 @@ export async function GET() {
       `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(s.key)}/odds` +
       `?apiKey=${encodeURIComponent(key)}&regions=us&oddsFormat=american&markets=h2h,spreads,totals`;
 
-    const [evRes, odRes] = await Promise.all([fetch(evUrl, { cache: "no-store" }), fetch(odUrl, { cache: "no-store" })]);
+    const [evRes, odRes] = await Promise.all([fetch(evUrl, oddsFetchInit), fetch(odUrl, oddsFetchInit)]);
     const evTxt = await evRes.text();
     const odTxt = await odRes.text();
     let evCount = 0;

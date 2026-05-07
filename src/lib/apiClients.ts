@@ -1,7 +1,19 @@
 import { mockGameDetails, mockGames, mockMarkets } from "./mockData";
-import { impliedProbabilityFromAmerican, isPlayerPropMarketType, isSportsbookLineSource } from "./odds";
-import { buildPlayerPropMarkets } from "./rosterProps";
-import { buildPlayerPropsFromOddsEvents, fetchMlbOddsEvents, mergeFanDuelPrices } from "./theOddsFanDuel";
+import {
+  filterLegiblePlayerPropsForSlate,
+  filterOutNonBookPlayerProps,
+  impliedProbabilityFromAmerican,
+  isPlayerPropMarketType,
+  isSportsbookLineSource
+} from "./odds";
+import { filterRundownMislabeledPlayerProps } from "./rosterProps";
+import {
+  buildPlayerPropsFromOddsEvents,
+  fetchMlbOddsEvents,
+  isRundownMarketAdaptableToOddsLayout,
+  mergeFanDuelPrices,
+  rundownMarketsToSyntheticOddsEvents
+} from "./theOddsFanDuel";
 import { fetchRundownMarketsForToday } from "./theRundown";
 import { applyRundownRetailSlate } from "./retailBoard";
 import { GameCard, GameDetail, Market, PlayerCard } from "./types";
@@ -112,6 +124,69 @@ function generateMarketsForGame(game: GameCard): Market[] {
 function clampAmerican(n: number): number {
   const v = Math.round(n);
   return Math.max(-450, Math.min(450, v));
+}
+
+function normPropDedupePart(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function playerPropSideKeyFromSelection(selection: string): string {
+  const t = selection.toLowerCase();
+  if (t.includes("(yes)")) return "yes";
+  if (t.includes("(no)")) return "no";
+  if (/\bover\b/.test(t)) return "over";
+  if (/\bunder\b/.test(t)) return "under";
+  return "x";
+}
+
+/** One row per leg; prefer major US books when the same prop is listed at multiple books. */
+function dedupeOddsApiPlayerPropsPreferFanDuel(rows: Market[]): Market[] {
+  const pref = ["fanduel", "draftkings", "betmgm", "espnbet", "caesars", "fanatics"];
+  const byKey = new Map<string, Market[]>();
+  for (const m of rows) {
+    const k = `${m.gameId}|${m.statKey ?? ""}|${normPropDedupePart(m.playerName ?? "")}|${m.line ?? "x"}|${playerPropSideKeyFromSelection(m.selection)}`;
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k)!.push(m);
+  }
+  const out: Market[] = [];
+  for (const group of byKey.values()) {
+    group.sort((a, b) => {
+      const ia = pref.indexOf(String(a.source).toLowerCase());
+      const ib = pref.indexOf(String(b.source).toLowerCase());
+      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    });
+    out.push(group[0]!);
+  }
+  return out;
+}
+
+/** Rundown retail slate: game lines stay; player props from Odds API when available, else Rundown rows re-shaped into the same Odds layout (no extra Odds billing). */
+async function mergeRundownRetailPlayerProps(retail: Market[], games: GameCard[]): Promise<Market[]> {
+  const gameLines = retail.filter((m) => !isPlayerPropMarketType(m.marketType));
+  const rundownPlayerRaw = retail.filter((m) => isPlayerPropMarketType(m.marketType));
+  const useOddsProps = !!process.env.ODDS_API_KEY?.trim();
+  if (useOddsProps) {
+    const events = await fetchMlbOddsEvents();
+    if (events.length) {
+      const api = dedupeOddsApiPlayerPropsPreferFanDuel(buildPlayerPropsFromOddsEvents(events, games));
+      return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps([...gameLines, ...api]), games);
+    }
+  }
+
+  const rosterFiltered = await filterRundownMislabeledPlayerProps(rundownPlayerRaw, games);
+  const adaptable = rundownPlayerRaw.filter((m) => {
+    const g = games.find((x) => x.id === m.gameId);
+    return isRundownMarketAdaptableToOddsLayout(m, g);
+  });
+  const byId = new Map<string, Market>();
+  for (const m of [...adaptable, ...rosterFiltered]) byId.set(m.id, m);
+  const synthetic = rundownMarketsToSyntheticOddsEvents([...byId.values()], games);
+  const fromOddsLayout =
+    synthetic.length > 0
+      ? dedupeOddsApiPlayerPropsPreferFanDuel(buildPlayerPropsFromOddsEvents(synthetic, games))
+      : [];
+  const playerLegs = fromOddsLayout.length ? fromOddsLayout : rosterFiltered;
+  return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps([...gameLines, ...playerLegs]), games);
 }
 
 function baselineBookAmericanForProp(m: Market): number | null {
@@ -279,17 +354,15 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
   if (provider === "rundown") {
     const rundown = await fetchRundownMarketsForToday(games);
     const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
-    const retail = applyRundownRetailSlate(sportsbook);
-    const byGame = retail.filter((m) => m.gameId === gameId);
-    return byGame;
+    const retail = await mergeRundownRetailPlayerProps(applyRundownRetailSlate(sportsbook), games);
+    return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(retail), games).filter((m) => m.gameId === gameId);
   }
   const game = games.find((g) => g.id === gameId);
   if (!game) return mockMarkets.filter((m) => m.gameId === gameId);
   const base = generateMarketsForGame(game);
   const useOddsProps = !!process.env.ODDS_API_KEY?.trim();
-  const player = useOddsProps ? [] : await buildPlayerPropMarkets(game);
   const events = await fetchMlbOddsEvents();
-  const merged = mergeFanDuelPrices([...base, ...player], games, events);
+  const merged = mergeFanDuelPrices([...base], games, events);
   // Odds-key mode: roster props rarely match Odds API line shapes; attach sportsbook-side props parsed from API.
   let out = merged;
   if (useOddsProps) {
@@ -298,10 +371,9 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
   }
   if (useOddsProps) {
     const sportsbook = out.filter((m) => isSportsbookLineSource(m.source));
-    // Strict sportsbook mode: never inject model/fallback when key/provider is configured.
-    return sportsbook;
+    return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(sportsbook), games);
   }
-  return calibrateModelPlayerPropsFromLiveLines(out);
+  return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(calibrateModelPlayerPropsFromLiveLines(out)), games);
 }
 
 export async function getAllMarkets(): Promise<Market[]> {
@@ -310,25 +382,26 @@ export async function getAllMarkets(): Promise<Market[]> {
     const games = await getDailySchedule();
     const rundown = await fetchRundownMarketsForToday(games);
     const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
-    return applyRundownRetailSlate(sportsbook);
+    return filterLegiblePlayerPropsForSlate(
+      filterOutNonBookPlayerProps(await mergeRundownRetailPlayerProps(applyRundownRetailSlate(sportsbook), games)),
+      games
+    );
   }
 
   const games = await getDailySchedule();
   if (!games.length) return mockMarkets;
   const core = games.flatMap((g) => generateMarketsForGame(g));
   const useOddsProps = !!process.env.ODDS_API_KEY?.trim();
-  const playerBlocks = useOddsProps ? [] : await Promise.all(games.map((g) => buildPlayerPropMarkets(g)));
-  const merged = [...core, ...playerBlocks.flat()];
+  const merged = [...core];
   const events = await fetchMlbOddsEvents();
   const priced = mergeFanDuelPrices(merged, games, events);
   if (useOddsProps) {
     const apiPlayer = buildPlayerPropsFromOddsEvents(events, games);
     const out = [...priced, ...apiPlayer];
     const sportsbook = out.filter((m) => isSportsbookLineSource(m.source));
-    // Strict sportsbook mode: never inject model/fallback when key/provider is configured.
-    return sportsbook;
+    return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(sportsbook), games);
   }
-  return calibrateModelPlayerPropsFromLiveLines(priced);
+  return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(calibrateModelPlayerPropsFromLiveLines(priced)), games);
 }
 
 export async function getWeatherFallback() {

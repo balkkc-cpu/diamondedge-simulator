@@ -6,12 +6,8 @@ import { GameLinesRow, PlayerPropColumns } from "@/components/PlayerPropColumns"
 import { PlayerTabsBoard } from "@/components/PlayerTabsBoard";
 import { useBetStore } from "@/store/betStore";
 import { GameCard, Market, SlipBet } from "@/lib/types";
-import { isPlayerPropMarketType } from "@/lib/odds";
+import { isLegibleSportsbookPlayerProp } from "@/lib/odds";
 import type { OddsDebugState } from "@/lib/theOddsFanDuel";
-
-function isPlayerMarket(m: Market) {
-  return isPlayerPropMarketType(m.marketType);
-}
 
 function gameFromUrl(): string | null {
   if (typeof window === "undefined") return null;
@@ -51,7 +47,7 @@ export default function BetBuilderPage() {
   }, [loadDashboard]);
 
   useEffect(() => {
-    const t = window.setInterval(loadDashboard, 600_000);
+    const t = window.setInterval(loadDashboard, 3_600_000);
     return () => window.clearInterval(t);
   }, [loadDashboard]);
 
@@ -68,8 +64,15 @@ export default function BetBuilderPage() {
   }, [loadSlip]);
 
   const forGame = useMemo(() => (data?.allMarkets ?? []).filter((m) => m.gameId === gameId), [data, gameId]);
-  const lineMarkets = useMemo(() => forGame.filter((m) => !isPlayerMarket(m)), [forGame]);
-  const playerMarkets = useMemo(() => forGame.filter((m) => isPlayerMarket(m)), [forGame]);
+  const currentGame = useMemo(() => (data?.games ?? []).find((g) => g.id === gameId), [data?.games, gameId]);
+  const lineMarkets = useMemo(
+    () => forGame.filter((m) => !isLegibleSportsbookPlayerProp(m, currentGame)),
+    [forGame, currentGame]
+  );
+  const playerMarkets = useMemo(
+    () => forGame.filter((m) => isLegibleSportsbookPlayerProp(m, currentGame)),
+    [forGame, currentGame]
+  );
   const oddsDebug = data?.oddsDebug;
   const noPlayerProps = playerMarkets.length === 0;
 
@@ -138,10 +141,11 @@ export default function BetBuilderPage() {
           <div>
             <h2 className="text-xl font-bold tracking-tight text-sky-300">Bet board</h2>
             <p className="mt-1 max-w-2xl text-sm text-slate-400">
-              Player board defaults to per-player tabs; switch to stat columns if you prefer. Board prices merge FanDuel
-              (then DraftKings if FD is missing) via The Odds API when{" "}
-              <code className="text-slate-300">ODDS_API_KEY</code> is set — client refetch every 10
-              minutes. With the key configured, only sportsbook-sourced odds are shown. Simulation only — not a sportsbook.
+              Player board defaults to per-player tabs; switch to stat columns if you prefer. With{" "}
+              <code className="text-slate-300">ODDS_PROVIDER=rundown</code>, player props use The Rundown feed re-shaped into
+              the same layout as The Odds API (hits, RBI, H+R+RBI, K, etc.) so the board matches book-style rows. When{" "}
+              <code className="text-slate-300">ODDS_API_KEY</code> is set and the Odds API returns events, those prices
+              override first; the client re-fetches about hourly. Simulation only — not a sportsbook.
             </p>
             {oddsBadge ? (
               <div className={`mt-2 inline-flex items-center gap-2 rounded-md border px-2 py-1 text-[11px] ${oddsBadge.tone}`}>

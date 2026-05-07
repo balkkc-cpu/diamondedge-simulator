@@ -63,7 +63,9 @@ export function PlayerTabsBoard({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-700/60 bg-slate-950/50 px-3 py-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-sky-400/90">Player props · by player</p>
-        <p className="text-[11px] text-slate-500">Odds refresh ~10 min when The Odds API key is set</p>
+        <p className="text-[11px] text-slate-500">
+          Book lines refresh on a long server cache (often ~24h) when The Odds API key is set — this page re-fetches hourly.
+        </p>
       </div>
 
       <div className="thin-scrollbar flex max-w-full gap-1 overflow-x-auto pb-1">

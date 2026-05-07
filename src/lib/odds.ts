@@ -1,3 +1,5 @@
+import type { GameCard, Market } from "./types";
+
 export function americanToDecimal(american: number): number {
   return american > 0 ? 1 + american / 100 : 1 + 100 / Math.abs(american);
 }
@@ -47,4 +49,77 @@ export function isSportsbookLineSource(source: string): boolean {
 export function isPlayerPropMarketType(marketType: string): boolean {
   const t = String(marketType ?? "").toLowerCase();
   return t === "player_prop" || t.startsWith("player_");
+}
+
+/** Drop player props that are not posted prices from a book (Odds API key or `rundown:` affiliate). */
+export function filterOutNonBookPlayerProps<T extends { marketType: string; source: string }>(markets: T[]): T[] {
+  return markets.filter((m) => !isPlayerPropMarketType(m.marketType) || isSportsbookLineSource(m.source));
+}
+
+function normTeamOrPlayerLabel(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/\./g, "")
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * True for markets that should appear under “player props” in the UI.
+ * Filters out mis-tagged team run/spread rows (often `player_prop` + team as `playerName`).
+ */
+function tailAfterPlayerDot(selection: string): string {
+  if (!selection.includes(" · ")) return "";
+  return selection.split(" · ").slice(1).join(" · ").trim().toLowerCase();
+}
+
+export function isLegibleSportsbookPlayerProp(
+  m: Market,
+  game: Pick<GameCard, "homeTeam" | "awayTeam"> | null | undefined
+): boolean {
+  if (!isPlayerPropMarketType(m.marketType) || !isSportsbookLineSource(m.source)) return false;
+  const low = m.selection.toLowerCase();
+  const tail = tailAfterPlayerDot(m.selection);
+  if (m.selection.includes(" · ")) {
+    if (
+      (/\bover\b|\bunder\b/.test(tail) && /\d/.test(tail)) ||
+      /\(yes\)|\(no\)/.test(tail) ||
+      /\d\s*\+\s/.test(tail)
+    ) {
+      // Odds API rows: "Name · Over 0.5 Hits" — reject "Team · +1.5" style tails.
+      return true;
+    }
+  }
+  const statish =
+    (/\bover\b|\bunder\b/.test(low) && /\d/.test(m.selection)) || /\(yes\)|\(no\)/.test(low) || /\d\s*\+\s/.test(low);
+  if (!statish || !m.statKey) return false;
+  const pn = normTeamOrPlayerLabel(String(m.playerName ?? ""));
+  if (!pn) return false;
+  if (game) {
+    const ht = normTeamOrPlayerLabel(game.homeTeam);
+    const at = normTeamOrPlayerLabel(game.awayTeam);
+    if (pn === ht || pn === at) return false;
+  }
+  return true;
+}
+
+/** Apply {@link isLegibleSportsbookPlayerProp} to player rows; pass through all non-player markets. */
+export function filterLegiblePlayerPropsForSlate(markets: Market[], games: GameCard[]): Market[] {
+  const byId = new Map(games.map((g) => [g.id, g]));
+  return markets.filter((m) => {
+    if (!isPlayerPropMarketType(m.marketType)) return true;
+    return isLegibleSportsbookPlayerProp(m, byId.get(m.gameId));
+  });
+}
+
+/** Default 24h — keeps The Odds API request volume low (override with ODDS_CACHE_SECONDS). */
+const DEFAULT_ODDS_CACHE_SEC = 86_400;
+
+/** Next.js `fetch` revalidate for Odds API responses (seconds). Min 300, max 7d. */
+export function oddsApiRevalidateSeconds(): number {
+  const raw = process.env.ODDS_CACHE_SECONDS ?? process.env.ODDS_REVALIDATE_SECONDS;
+  if (raw == null || String(raw).trim() === "") return DEFAULT_ODDS_CACHE_SEC;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 300) return 300;
+  return Math.min(Math.floor(n), 86_400 * 7);
 }
