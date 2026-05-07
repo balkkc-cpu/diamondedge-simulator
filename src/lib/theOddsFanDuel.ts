@@ -140,7 +140,7 @@ function mergeEventsById(lists: unknown[][]): unknown[] {
 const CORE_MARKETS =
   "h2h,spreads,totals,h2h_1st_5_innings,totals_1st_1_innings,team_totals,alternate_team_totals";
 const PLAYER_MARKETS =
-  "batter_hits,batter_home_runs,batter_home_runs_alternate,batter_total_bases,batter_rbis,batter_runs,pitcher_strikeouts,batter_walks";
+  "batter_hits,batter_home_runs,batter_home_runs_alternate,batter_total_bases,batter_rbis,batter_runs_scored,batter_hits_runs_rbis,pitcher_strikeouts,batter_walks";
 
 async function logOddsApiError(res: Response, tag: string): Promise<void> {
   let body = "";
@@ -240,7 +240,8 @@ const PLAYER_MARKET_KEYS: Record<string, string> = {
   hr: "batter_home_runs",
   tb: "batter_total_bases",
   rbi: "batter_rbis",
-  runs: "batter_runs",
+  runs: "batter_runs_scored",
+  hrr: "batter_hits_runs_rbis",
   walks: "batter_walks",
   k: "pitcher_strikeouts"
 };
