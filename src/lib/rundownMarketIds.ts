@@ -115,7 +115,7 @@ export async function fetchRundownMarketsCatalogForSportDate(
   sportId: string,
   dateYmd: string,
   apiKey: string
-): Promise<RundownMarketDef[]> {
+): Promise<{ defs: RundownMarketDef[]; httpStatus: number }> {
   const offset = String(process.env.RUNDOWN_DATE_OFFSET_MINUTES ?? "300").trim();
   const url =
     `https://therundown.io/api/v2/sports/${encodeURIComponent(sportId)}/markets/${encodeURIComponent(dateYmd)}` +
@@ -125,12 +125,12 @@ export async function fetchRundownMarketsCatalogForSportDate(
     headers: rundownRequestHeaders(apiKey),
     next: { revalidate: 600 }
   });
-  if (!res.ok) return [];
+  if (!res.ok) return { defs: [], httpStatus: res.status };
   let data: Record<string, unknown>;
   try {
     data = (await res.json()) as Record<string, unknown>;
   } catch {
-    return [];
+    return { defs: [], httpStatus: res.status };
   }
 
   const raw = data[String(sportId)];
@@ -152,7 +152,7 @@ export async function fetchRundownMarketsCatalogForSportDate(
           : null
     });
   }
-  return out;
+  return { defs: out, httpStatus: res.status };
 }
 
 /**
@@ -168,9 +168,10 @@ export async function buildRundownMarketIdsForFetch(params: {
   discoveredPropIds: number[];
   catalogPropositions: number;
   catalog: RundownMarketDef[];
+  catalogHttpStatus: number;
 }> {
   const discover = String(process.env.RUNDOWN_DISCOVER_PROP_MARKET_IDS ?? "true").toLowerCase() !== "false";
-  const maxIds = Math.min(80, Math.max(12, Number(process.env.RUNDOWN_MAX_MARKET_IDS ?? "56") || 56));
+  const maxIds = Math.min(80, Math.max(12, Number(process.env.RUNDOWN_MAX_MARKET_IDS ?? "72") || 72));
 
   const envBase = process.env.RUNDOWN_MARKET_IDS?.trim();
   const baseIds = uniqueSorted(parseIdList(envBase && envBase.length > 0 ? envBase : "1,2,3"));
@@ -178,9 +179,12 @@ export async function buildRundownMarketIdsForFetch(params: {
   let propIds: number[] = [];
   let catalogCount = 0;
   let catalog: RundownMarketDef[] = [];
+  let catalogHttpStatus = 0;
 
   if (discover) {
-    catalog = await fetchRundownMarketsCatalogForSportDate(params.sportId, params.dateYmd, params.apiKey);
+    const { defs, httpStatus } = await fetchRundownMarketsCatalogForSportDate(params.sportId, params.dateYmd, params.apiKey);
+    catalogHttpStatus = httpStatus;
+    catalog = defs;
     const propositions = catalog.filter((m) => m.proposition);
     catalogCount = propositions.length;
     const expanded = new Set<number>();
@@ -188,16 +192,29 @@ export async function buildRundownMarketIdsForFetch(params: {
       expanded.add(m.id);
       if (m.live_variant_id != null && m.live_variant_id > 0) expanded.add(m.live_variant_id);
     }
-    propIds = [...expanded];
+    propIds = uniqueSorted([...expanded]);
   }
 
   const extra = parseIdList(process.env.RUNDOWN_EXTRA_MARKET_IDS);
-  const merged = uniqueSorted([...baseIds, ...propIds, ...extra]);
-  const capped = merged.slice(0, maxIds);
+  /** Always request core sides first, then discovered props (so long RUNDOWN_MARKET_IDS lists cannot crowd props out). */
+  const MIN_CORE = [1, 2, 3];
+  const baseExtras = baseIds.filter((id) => !MIN_CORE.includes(id));
+  const prioritized: number[] = [];
+  const pushCap = (id: number) => {
+    if (!Number.isFinite(id) || id <= 0) return;
+    if (prioritized.length >= maxIds) return;
+    if (!prioritized.includes(id)) prioritized.push(id);
+  };
+  for (const id of MIN_CORE) pushCap(id);
+  for (const id of propIds) pushCap(id);
+  for (const id of baseExtras) pushCap(id);
+  for (const id of extra) pushCap(id);
+
   return {
-    marketIdsParam: capped.join(","),
+    marketIdsParam: prioritized.join(","),
     discoveredPropIds: propIds,
     catalogPropositions: catalogCount,
-    catalog
+    catalog,
+    catalogHttpStatus
   };
 }

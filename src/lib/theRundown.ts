@@ -56,6 +56,10 @@ function decimalToAmerican(decimal: number): number | null {
 function extractAmerican(participant: any): number | null {
   const direct = num(participant?.price) ?? num(participant?.american) ?? num(participant?.moneyline);
   if (direct != null && Math.abs(direct) >= 100) return Math.round(direct);
+  if (direct != null && direct > 1 && direct < 50) {
+    const fromDec = decimalToAmerican(direct);
+    if (fromDec != null) return fromDec;
+  }
   const nested =
     num(participant?.odds?.american) ??
     num(participant?.odds?.us) ??
@@ -73,13 +77,37 @@ function extractAmerican(participant: any): number | null {
   return null;
 }
 
+/** The Rundown sometimes stores US odds in `price`, sometimes decimal odds, and 0.0001 = off the board. */
+function americanFromLinePriceRaw(raw: any): number | null {
+  const p0 = num((raw as any)?.price);
+  if (p0 != null && p0 > 0 && p0 < 0.01) return null;
+  const direct =
+    num((raw as any)?.price) ??
+    num((raw as any)?.american) ??
+    num((raw as any)?.odds?.american) ??
+    num((raw as any)?.odds?.us);
+  if (direct != null && Number.isFinite(direct)) {
+    const a = Math.round(direct);
+    if (Math.abs(a) >= 100) return a;
+  }
+  const dec =
+    num((raw as any)?.decimal) ??
+    num((raw as any)?.odds?.decimal) ??
+    (p0 != null && p0 > 1 && p0 < 50 ? p0 : null);
+  if (dec != null && dec > 1) {
+    const am = decimalToAmerican(dec);
+    if (am != null && Math.abs(am) >= 1) return am;
+  }
+  return null;
+}
+
 function extractLinePrices(lineObj: any): Array<{ source: string; american: number; isMain: boolean }> {
   const out: Array<{ source: string; american: number; isMain: boolean }> = [];
   const prices = lineObj?.prices;
   if (!prices || typeof prices !== "object") return out;
   for (const [bookId, raw] of Object.entries(prices as Record<string, any>)) {
-    const american = num((raw as any)?.price);
-    if (american == null || Math.abs(american) < 100) continue;
+    const american = americanFromLinePriceRaw(raw);
+    if (american == null) continue;
     out.push({
       source: `rundown:${String(bookId)}`,
       american: Math.round(american),
@@ -87,7 +115,9 @@ function extractLinePrices(lineObj: any): Array<{ source: string; american: numb
     });
   }
   const hasMain = out.some((x) => x.isMain);
-  return hasMain ? out.filter((x) => x.isMain) : out;
+  if (!hasMain) return out;
+  const mains = out.filter((x) => x.isMain);
+  return mains.length ? mains : out;
 }
 
 function isCoreGameLineType(t: string): boolean {
@@ -153,11 +183,12 @@ export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promi
   const offset = String(process.env.RUNDOWN_DATE_OFFSET_MINUTES ?? "300").trim();
   const affiliateIds = process.env.RUNDOWN_AFFILIATE_IDS?.trim();
 
-  const { marketIdsParam, catalogPropositions, discoveredPropIds, catalog } = await buildRundownMarketIdsForFetch({
-    sportId,
-    dateYmd: date,
-    apiKey: key
-  });
+  const { marketIdsParam, catalogPropositions, discoveredPropIds, catalog, catalogHttpStatus } =
+    await buildRundownMarketIdsForFetch({
+      sportId,
+      dateYmd: date,
+      apiKey: key
+    });
 
   const metaByMarketId = new Map<number, RundownMarketDef>();
   for (const row of catalog) {
@@ -285,9 +316,10 @@ export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promi
         }
       }
     }
+    const propRows = out.filter((m) => m.marketType === "player_prop" || m.marketType.startsWith("player_"));
     setRundownDebug({
       status: out.length ? "ok" : "no_events",
-      detail: `${out.length} priced markets across ${events.length} events / ${marketCount} markets · props catalog ${catalogPropositions} · merged ids ${marketIdsParam.split(",").length} (discovered ${discoveredPropIds.length})`
+      detail: `${out.length} priced rows · ${propRows.length} player-prop rows · ${events.length} events / ${marketCount} markets · catalog http ${catalogHttpStatus} · proposition defs ${catalogPropositions} · merged market_ids ${marketIdsParam.split(",").length} (discovered prop ids ${discoveredPropIds.length})`
     });
     return out;
   } catch (e) {
