@@ -133,8 +133,11 @@ export async function fetchRundownMarketsCatalogForSportDate(
     return { defs: [], httpStatus: res.status };
   }
 
-  const raw = data[String(sportId)];
-  const arr = Array.isArray(raw) ? raw : [];
+  let arr: any[] = Array.isArray(data[String(sportId)]) ? (data[String(sportId)] as any[]) : [];
+  if (!arr.length && data && typeof data === "object") {
+    const first = Object.values(data).find((v) => Array.isArray(v) && (v as any[]).length > 0);
+    if (first) arr = first as any[];
+  }
   const out: RundownMarketDef[] = [];
   for (const row of arr) {
     const id = Number((row as any)?.id);
@@ -181,11 +184,21 @@ export async function buildRundownMarketIdsForFetch(params: {
   let catalog: RundownMarketDef[] = [];
   let catalogHttpStatus = 0;
 
+  /** When `proposition` is false on catalog rows, still treat obvious stat markets as props (some keys/plans omit the flag). */
+  function catalogRowLooksLikePlayerProp(m: RundownMarketDef): boolean {
+    if (m.proposition) return true;
+    const blob = normRundownText(m.name, m.short_description, m.description);
+    if (/\b(moneyline|spread|run line|total|team total)\b/i.test(blob)) return false;
+    return /\b(batter|pitcher|player|strikeout|strike\s*out|home\s*run|\bhr\b|\bhits?\b|\brbi\b|\bruns\b|walk|stolen|single|double|triple|outs|allowed|pickoff|plate appearance|\bat\s*bats?\b|\bab\b|to\s*record|double\s*double|triple\s*double)/i.test(
+      blob
+    );
+  }
+
   if (discover) {
     const { defs, httpStatus } = await fetchRundownMarketsCatalogForSportDate(params.sportId, params.dateYmd, params.apiKey);
     catalogHttpStatus = httpStatus;
     catalog = defs;
-    const propositions = catalog.filter((m) => m.proposition);
+    const propositions = catalog.filter(catalogRowLooksLikePlayerProp);
     catalogCount = propositions.length;
     const expanded = new Set<number>();
     for (const m of propositions) {

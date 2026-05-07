@@ -165,8 +165,155 @@ function resolveGameIdFromEvent(ev: any, games: GameCard[]): string {
   const teams: any[] = Array.isArray(ev?.teams) ? ev.teams : [];
   const away = String(teams.find((t) => t?.is_away)?.name ?? teams[0]?.name ?? "");
   const home = String(teams.find((t) => t?.is_away === false)?.name ?? teams[1]?.name ?? "");
-  const match = games.find((g) => teamsMatchLoose(g.awayTeam, away) && teamsMatchLoose(g.homeTeam, home));
+  const match =
+    games.find((g) => teamsMatchLoose(g.awayTeam, away) && teamsMatchLoose(g.homeTeam, home)) ??
+    games.find((g) => teamsMatchLoose(g.awayTeam, home) && teamsMatchLoose(g.homeTeam, away));
   return match?.id ?? String(ev?.event_id ?? "");
+}
+
+function ingestRundownEvents(
+  events: any[],
+  games: GameCard[],
+  metaByMarketId: Map<number, RundownMarketDef>,
+  date: string
+): Market[] {
+  const out: Market[] = [];
+  for (const ev of events) {
+    const eventId = String(ev?.event_id ?? "");
+    const mappedGameId = resolveGameIdFromEvent(ev, games);
+    const markets: any[] = Array.isArray(ev?.markets) ? ev.markets : [];
+    for (const mk of markets) {
+      const mkName = String(mk?.name ?? `market_${mk?.market_id ?? "x"}`);
+      const mid = Number(mk?.market_id);
+      const meta = Number.isFinite(mid) ? metaByMarketId.get(mid) : undefined;
+      let marketType = marketTypeFromName(mkName);
+      if (!isCoreGameLineType(marketType) && (meta?.proposition === true || looksLikeRundownPlayerPropName(mkName))) {
+        marketType = "player_prop";
+      }
+      const nameMeta = {
+        id: Number.isFinite(mid) ? mid : 0,
+        name: mkName,
+        proposition: Boolean(meta?.proposition),
+        short_description: meta?.short_description,
+        description: meta?.description
+      };
+      const bookPropCode = bookPropCodeFromRundownDef(meta ?? nameMeta);
+      const statKey = inferStatKeyFromRundownDef(meta ?? nameMeta);
+      const pickKind = inferPickKindFromRundownDef(meta ?? nameMeta);
+      const participantGroups: Array<{ source: string; rows: any[] }> = [];
+      if (Array.isArray(mk?.participants)) participantGroups.push({ source: "rundown", rows: mk.participants });
+      const booksA: any[] = Array.isArray(mk?.books) ? mk.books : [];
+      for (const b of booksA) {
+        if (Array.isArray(b?.participants)) {
+          participantGroups.push({
+            source: String(b?.name ?? b?.book_name ?? b?.book_id ?? "rundown"),
+            rows: b.participants
+          });
+        }
+      }
+      const booksB: any[] = Array.isArray(mk?.bookmakers) ? mk.bookmakers : [];
+      for (const b of booksB) {
+        if (Array.isArray(b?.participants)) {
+          participantGroups.push({ source: String(b?.name ?? b?.key ?? "rundown"), rows: b.participants });
+        }
+      }
+      if (!participantGroups.length) continue;
+
+      for (const grp of participantGroups) {
+        for (let i = 0; i < grp.rows.length; i++) {
+          const p = grp.rows[i];
+          const pname = String(p?.name ?? p?.participant_name ?? `Selection ${i + 1}`);
+          let participantLines: any[] = Array.isArray(p?.lines) ? [...p.lines] : [];
+          if (
+            !participantLines.length &&
+            p?.prices &&
+            typeof p.prices === "object" &&
+            Object.keys(p.prices).length > 0
+          ) {
+            participantLines.push({
+              value: num(p?.points) ?? num(p?.line) ?? num(p?.value),
+              prices: p.prices
+            });
+          }
+          let emitted = false;
+          for (let li = 0; li < participantLines.length; li++) {
+            const ln = participantLines[li];
+            const lineValue = num(ln?.value) ?? num(p?.points) ?? num(p?.line) ?? null;
+            const prices = extractLinePrices(ln);
+            for (const pr of prices) {
+              const selection = lineValue != null ? `${pname} ${lineValue > 0 ? `+${lineValue}` : lineValue}` : pname;
+              const { playerName } = parseRundownParticipantName(pname);
+              out.push({
+                id: `rundown-${eventId}-${String(mk?.market_id ?? mkName)}-${pr.source}-${i}-${li}`,
+                gameId: mappedGameId || eventId || `rundown-${date}`,
+                marketType,
+                selection,
+                line: lineValue,
+                american: pr.american,
+                source: pr.source,
+                playerName,
+                statKey,
+                pickKind,
+                rundownMarketId: Number.isFinite(mid) ? mid : undefined,
+                bookPropCode
+              });
+              emitted = true;
+            }
+          }
+          if (!emitted) {
+            const american = extractAmerican(p);
+            if (american == null) continue;
+            const line = num(p?.points) ?? num(p?.line) ?? null;
+            const selection = line != null ? `${pname} ${line > 0 ? `+${line}` : line}` : pname;
+            const { playerName } = parseRundownParticipantName(pname);
+            out.push({
+              id: `rundown-${eventId}-${String(mk?.market_id ?? mkName)}-${grp.source}-${i}`,
+              gameId: mappedGameId || eventId || `rundown-${date}`,
+              marketType,
+              selection,
+              line,
+              american,
+              source: String(grp.source).toLowerCase(),
+              playerName,
+              statKey,
+              pickKind,
+              rundownMarketId: Number.isFinite(mid) ? mid : undefined,
+              bookPropCode
+            });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+async function fetchRundownEventsPage(
+  sportId: string,
+  date: string,
+  offset: string,
+  marketIdsParam: string,
+  key: string,
+  affiliateIds?: string
+): Promise<{ ok: boolean; events: any[]; status: number }> {
+  let url =
+    `https://therundown.io/api/v2/sports/${encodeURIComponent(sportId)}/events/${encodeURIComponent(date)}` +
+    `?market_ids=${encodeURIComponent(marketIdsParam)}&offset=${encodeURIComponent(offset)}`;
+  if (affiliateIds) {
+    url += `&affiliate_ids=${encodeURIComponent(affiliateIds)}`;
+  }
+  const res = await fetch(url, {
+    headers: rundownRequestHeaders(key),
+    next: { revalidate: 120 }
+  });
+  if (!res.ok) return { ok: false, events: [], status: res.status };
+  try {
+    const data = await res.json();
+    const events: any[] = Array.isArray(data?.events) ? data.events : [];
+    return { ok: true, events, status: res.status };
+  } catch {
+    return { ok: false, events: [], status: res.status };
+  }
 }
 
 export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promise<Market[]> {
@@ -196,130 +343,57 @@ export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promi
     if (row.live_variant_id != null && row.live_variant_id > 0) metaByMarketId.set(row.live_variant_id, row);
   }
 
-  let url =
-    `https://therundown.io/api/v2/sports/${encodeURIComponent(sportId)}/events/${encodeURIComponent(date)}` +
-    `?market_ids=${encodeURIComponent(marketIdsParam)}&offset=${encodeURIComponent(offset)}`;
-  if (affiliateIds) {
-    url += `&affiliate_ids=${encodeURIComponent(affiliateIds)}`;
-  }
-
   try {
-    const res = await fetch(url, {
-      headers: rundownRequestHeaders(key),
-      next: { revalidate: 120 }
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      setRundownDebug({ status: "http_error", detail: `${res.status} ${body.slice(0, 180)}`.trim() });
+    const primary = await fetchRundownEventsPage(sportId, date, offset, marketIdsParam, key, affiliateIds);
+    if (!primary.ok) {
+      setRundownDebug({
+        status: "http_error",
+        detail: `${primary.status} events fetch (primary market_ids batch)`
+      });
       return [];
     }
-    const data = await res.json();
-    const events: any[] = Array.isArray(data?.events) ? data.events : [];
-    if (!events.length) {
+    if (!primary.events.length) {
       setRundownDebug({ status: "no_events", detail: "No events returned from Rundown" });
       return [];
     }
 
-    const out: Market[] = [];
-    let marketCount = 0;
-    for (const ev of events) {
-      const eventId = String(ev?.event_id ?? "");
-      const mappedGameId = resolveGameIdFromEvent(ev, games);
-      const markets: any[] = Array.isArray(ev?.markets) ? ev.markets : [];
-      for (const mk of markets) {
-        marketCount += 1;
-        const mkName = String(mk?.name ?? `market_${mk?.market_id ?? "x"}`);
-        const mid = Number(mk?.market_id);
-        const meta = Number.isFinite(mid) ? metaByMarketId.get(mid) : undefined;
-        let marketType = marketTypeFromName(mkName);
-        if (!isCoreGameLineType(marketType) && meta?.proposition === true) {
-          marketType = "player_prop";
-        }
-        const nameMeta = {
-          id: Number.isFinite(mid) ? mid : 0,
-          name: mkName,
-          proposition: Boolean(meta?.proposition),
-          short_description: meta?.short_description,
-          description: meta?.description
-        };
-        const bookPropCode = bookPropCodeFromRundownDef(meta ?? nameMeta);
-        const statKey = inferStatKeyFromRundownDef(meta ?? nameMeta);
-        const pickKind = inferPickKindFromRundownDef(meta ?? nameMeta);
-        const participantGroups: Array<{ source: string; rows: any[] }> = [];
-        if (Array.isArray(mk?.participants)) participantGroups.push({ source: "rundown", rows: mk.participants });
-        const booksA: any[] = Array.isArray(mk?.books) ? mk.books : [];
-        for (const b of booksA) {
-          if (Array.isArray(b?.participants)) {
-            participantGroups.push({ source: String(b?.name ?? b?.book_name ?? b?.book_id ?? "rundown"), rows: b.participants });
-          }
-        }
-        const booksB: any[] = Array.isArray(mk?.bookmakers) ? mk.bookmakers : [];
-        for (const b of booksB) {
-          if (Array.isArray(b?.participants)) {
-            participantGroups.push({ source: String(b?.name ?? b?.key ?? "rundown"), rows: b.participants });
-          }
-        }
-        if (!participantGroups.length) continue;
+    let out = ingestRundownEvents(primary.events, games, metaByMarketId, date);
 
-        for (const grp of participantGroups) {
-          for (let i = 0; i < grp.rows.length; i++) {
-            const p = grp.rows[i];
-            const pname = String(p?.name ?? p?.participant_name ?? `Selection ${i + 1}`);
-            const participantLines: any[] = Array.isArray(p?.lines) ? p.lines : [];
-            let emitted = false;
-            for (let li = 0; li < participantLines.length; li++) {
-              const ln = participantLines[li];
-              const lineValue = num(ln?.value) ?? num(p?.points) ?? num(p?.line) ?? null;
-              const prices = extractLinePrices(ln);
-              for (const pr of prices) {
-                const selection = lineValue != null ? `${pname} ${lineValue > 0 ? `+${lineValue}` : lineValue}` : pname;
-                const { playerName } = parseRundownParticipantName(pname);
-                out.push({
-                  id: `rundown-${eventId}-${String(mk?.market_id ?? mkName)}-${pr.source}-${i}-${li}`,
-                  gameId: mappedGameId || eventId || `rundown-${date}`,
-                  marketType,
-                  selection,
-                  line: lineValue,
-                  american: pr.american,
-                  source: pr.source,
-                  playerName,
-                  statKey,
-                  pickKind,
-                  rundownMarketId: Number.isFinite(mid) ? mid : undefined,
-                  bookPropCode
-                });
-                emitted = true;
-              }
-            }
-            if (!emitted) {
-              const american = extractAmerican(p);
-              if (american == null) continue;
-              const line = num(p?.points) ?? num(p?.line) ?? null;
-              const selection = line != null ? `${pname} ${line > 0 ? `+${line}` : line}` : pname;
-              const { playerName } = parseRundownParticipantName(pname);
-              out.push({
-                id: `rundown-${eventId}-${String(mk?.market_id ?? mkName)}-${grp.source}-${i}`,
-                gameId: mappedGameId || eventId || `rundown-${date}`,
-                marketType,
-                selection,
-                line,
-                american,
-                source: String(grp.source).toLowerCase(),
-                playerName,
-                statKey,
-                pickKind,
-                rundownMarketId: Number.isFinite(mid) ? mid : undefined,
-                bookPropCode
-              });
-            }
-        }
-        }
+    const propRowsNow = () => out.filter((m) => m.marketType === "player_prop" || m.marketType.startsWith("player_"));
+
+    if (propRowsNow().length === 0 && affiliateIds) {
+      const bare = await fetchRundownEventsPage(sportId, date, offset, marketIdsParam, key, undefined);
+      if (bare.ok && bare.events.length) {
+        const alt = ingestRundownEvents(bare.events, games, metaByMarketId, date);
+        const altProps = alt.filter((m) => m.marketType === "player_prop" || m.marketType.startsWith("player_"));
+        if (altProps.length > propRowsNow().length) out = alt;
       }
     }
+    const BATCH = Math.min(16, Math.max(8, Number(process.env.RUNDOWN_PROP_MARKET_ID_BATCH ?? "12") || 12));
+    const MAX_BATCHES = Math.min(10, Math.max(2, Number(process.env.RUNDOWN_PROP_FETCH_BATCHES ?? "8") || 8));
+
+    if (propRowsNow().length === 0 && discoveredPropIds.length > 0) {
+      const dedupe = new Map<string, Market>();
+      for (const m of out) dedupe.set(m.id, m);
+      const core = [1, 2, 3];
+      let batches = 0;
+      for (let s = 0; s < discoveredPropIds.length && batches < MAX_BATCHES; s += BATCH) {
+        const chunk = discoveredPropIds.slice(s, s + BATCH);
+        const param = [...new Set([...core, ...chunk])].sort((a, b) => a - b).join(",");
+        const page = await fetchRundownEventsPage(sportId, date, offset, param, key, affiliateIds);
+        batches += 1;
+        if (!page.ok || !page.events.length) continue;
+        const more = ingestRundownEvents(page.events, games, metaByMarketId, date);
+        for (const m of more) dedupe.set(m.id, m);
+        out = [...dedupe.values()];
+        if (propRowsNow().length > 0) break;
+      }
+    }
+
     const propRows = out.filter((m) => m.marketType === "player_prop" || m.marketType.startsWith("player_"));
     setRundownDebug({
       status: out.length ? "ok" : "no_events",
-      detail: `${out.length} priced rows · ${propRows.length} player-prop rows · ${events.length} events / ${marketCount} markets · catalog http ${catalogHttpStatus} · proposition defs ${catalogPropositions} · merged market_ids ${marketIdsParam.split(",").length} (discovered prop ids ${discoveredPropIds.length})`
+      detail: `${out.length} priced rows · ${propRows.length} player-prop rows · ${primary.events.length} events (primary) · catalog http ${catalogHttpStatus} · proposition defs ${catalogPropositions} · merged market_ids ${marketIdsParam.split(",").length} (discovered prop ids ${discoveredPropIds.length})`
     });
     return out;
   } catch (e) {
