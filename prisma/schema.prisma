@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Team {
+  id             String    @id @default(cuid())
+  name           String
+  abbreviation   String    @unique
+  offenseRating  Float
+  bullpenRating  Float
+  defenseRating  Float
+  ballparkFactor Float
+  players        Player[]
+  homeGames      Game[]    @relation("HomeTeam")
+  awayGames      Game[]    @relation("AwayTeam")
+  injuries       Injury[]
+}
+
+model Player {
+  id               String   @id @default(cuid())
+  teamId           String
+  name             String
+  position         String
+  handedness       String
+  battingRating    Float
+  pitcherRating    Float
+  strikeoutRate    Float
+  hitRate          Float
+  totalBaseRate    Float
+  homeRunRate      Float
+  rbiRate          Float
+  projectedLineup  Int?
+  team             Team     @relation(fields: [teamId], references: [id])
+}
+
+model Game {
+  id             String          @id @default(cuid())
+  externalId     String?         @unique
+  gameDate       DateTime
+  status         String
+  homeTeamId     String
+  awayTeamId     String
+  homeProb       Float?
+  awayProb       Float?
+  weatherSummary String?
+  homeTeam       Team            @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam       Team            @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  oddsMarkets    OddsMarket[]
+  liveGameState  LiveGameState?
+  simulations    Simulation[]
+}
+
+model OddsMarket {
+  id         String  @id @default(cuid())
+  gameId     String
+  marketType String
+  selection  String
+  line       Float?
+  american   Int
+  source     String
+  game       Game    @relation(fields: [gameId], references: [id])
+}
+
+model BetSlip {
+  id           String    @id @default(cuid())
+  bankroll     Float
+  unitSize     Float
+  createdAt    DateTime  @default(now())
+  bets         Bet[]
+  simulations  Simulation[]
+}
+
+model Bet {
+  id             String   @id @default(cuid())
+  slipId         String
+  gameId         String
+  marketType     String
+  selection      String
+  oddsAmerican   Int
+  stakeUnits     Float
+  impliedProb    Float?
+  simProb        Float?
+  edge           Float?
+  expectedValue  Float?
+  confidence     String?
+  riskLevel      String?
+  slip           BetSlip  @relation(fields: [slipId], references: [id])
+}
+
+model Simulation {
+  id            String             @id @default(cuid())
+  gameId        String
+  betSlipId     String?
+  iterations    Int
+  createdAt     DateTime           @default(now())
+  game          Game               @relation(fields: [gameId], references: [id])
+  betSlip       BetSlip?           @relation(fields: [betSlipId], references: [id])
+  results       SimulationResult[]
+}
+
+model SimulationResult {
+  id               String     @id @default(cuid())
+  simulationId     String
+  marketType       String
+  selection        String
+  hitProbability   Float
+  expectedValue    Float
+  confidenceScore  Float
+  riskWarning      String
+  suggestedUnits   Float
+  scoreHistogram   String
+  simulation       Simulation @relation(fields: [simulationId], references: [id])
+}
+
+model Injury {
+  id          String   @id @default(cuid())
+  teamId      String
+  playerName  String
+  status      String
+  note        String?
+  updatedAt   DateTime @updatedAt
+  team        Team     @relation(fields: [teamId], references: [id])
+}
+
+model LiveGameState {
+  id                 String   @id @default(cuid())
+  gameId             String   @unique
+  inning             Int
+  half               String
+  outs               Int
+  runners            String
+  homeScore          Int
+  awayScore          Int
+  liveHomeWinProb    Float
+  liveAwayWinProb    Float
+  game               Game     @relation(fields: [gameId], references: [id])
+}
+
+model User {
+  id               String              @id @default(cuid())
+  email            String              @unique
+  passwordHash     String
+  emailVerified    Boolean             @default(false)
+  displayName      String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  tokens           VerificationToken[]
+  savedSlips       UserSavedSlip[]
+  savedSimulations UserSavedSimulation[]
+  communityPosts   CommunityPost[]
+}
+
+// User-saved bet slips from Bet Builder (JSON legs).
+model UserSavedSlip {
+  id         String   @id @default(cuid())
+  userId     String
+  name       String?
+  bankroll   Float
+  unitSize   Float
+  betsJson   String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// Full simulation payload (results, breakdowns, histogram) for history / replay.
+model UserSavedSimulation {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String?
+  payloadJson String
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// Community wins board — caption + optional image (data URL or external URL).
+model CommunityPost {
+  id        String   @id @default(cuid())
+  userId    String
+  caption   String?
+  imageUrl  String?
+  imageData String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+}
+
+model VerificationToken {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  type       String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
