@@ -2,8 +2,9 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Use PostgreSQL everywhere (Neon / Vercel Postgres / Supabase). Serverless hosts cannot rely on SQLite file URLs.
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

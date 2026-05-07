@@ -29,7 +29,7 @@ function prismaSignupErrorMessage(e: unknown): string {
     return "Database rejected the credentials in DATABASE_URL. Regenerate the password in your host (e.g. Neon/Vercel Postgres) and paste the full connection string again.";
   }
   if (/does not support|provider.*mismatch|error opening a TLS connection/i.test(msg)) {
-    return "DATABASE_URL does not match this app’s Prisma setup (e.g. Postgres URL but the schema is still SQLite). Use a SQLite-compatible hosted DB (Turso) or switch the Prisma datasource to postgresql and redeploy.";
+    return "DATABASE_URL is invalid or does not match the database type. Use a PostgreSQL connection string (Neon / Vercel Postgres) and redeploy.";
   }
   if (/Unique constraint|already exists|P2002/i.test(msg)) {
     return "Account already exists for that email.";
