@@ -1,3 +1,4 @@
+import { isPlayerPropMarketType } from "@/lib/odds";
 import { runSimulation1000 } from "@/lib/simEngine";
 import { explainLeg } from "@/lib/simExplain";
 import type { GameCard, Market, SlipBet } from "@/lib/types";
@@ -92,7 +93,7 @@ export async function buildSuggestedParlaysFromBoard(input: {
   const parlayLegs = input.parlayLegs ?? 3;
 
   // Only use sportsbook-ish markets when present; otherwise include everything.
-  let board = input.markets.filter((m) => m.marketType.startsWith("player_"));
+  let board = input.markets.filter((m) => isPlayerPropMarketType(m.marketType));
   if (!board.length) {
     // Fallback: if ODDS_API_KEY mode returns no player markets, use roster/model
     // props so the dashboard never shows an empty "Suggested parlays" widget.
@@ -100,12 +101,12 @@ export async function buildSuggestedParlaysFromBoard(input: {
       input.games.map((g) => buildPlayerPropMarkets(g as any))
     );
     const rosterMarkets = rosterBlocks.flat();
-    board = rosterMarkets.filter((m) => m.marketType.startsWith("player_"));
+    board = rosterMarkets.filter((m) => isPlayerPropMarketType(m.marketType));
     if (!board.length) {
       // Last-resort fallback: keep the dashboard widget populated even when
       // the odds-provider returns no player props and roster market generation
       // can't run (missing team ids, etc.).
-      board = mockMarkets.filter((m) => m.marketType.startsWith("player_"));
+      board = mockMarkets.filter((m) => isPlayerPropMarketType(m.marketType));
       if (!board.length) return [];
     }
   }

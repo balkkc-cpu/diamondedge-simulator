@@ -95,6 +95,7 @@ function inferPickKind(bet: SlipBet): PickKind {
 function inferStatKey(bet: SlipBet): string {
   if (bet.statKey) return bet.statKey;
   const m = bet.marketType.toLowerCase();
+  if (m === "player_prop") return bet.statKey ?? "";
   if (m.startsWith("player_")) return m.replace(/^player_/, "");
   return "";
 }
@@ -147,7 +148,7 @@ function baselineHitProb(bet: SlipBet): number {
   if (m === "yrfi") return 0.48 + jitter * 0.12;
   if (m === "nrfi") return 0.48 + jitter * 0.12;
 
-  if (m.startsWith("player_")) {
+  if (m === "player_prop" || m.startsWith("player_")) {
     const stat = inferStatKey(bet);
     const pk = inferPickKind(bet);
     if (pk === "yes_no") return tierBaseline("hr", 1) + jitter * 0.12;

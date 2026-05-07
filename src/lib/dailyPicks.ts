@@ -1,5 +1,5 @@
 import { getAllMarkets, getDailySchedule } from "./apiClients";
-import { isSportsbookLineSource } from "./odds";
+import { isPlayerPropMarketType, isSportsbookLineSource } from "./odds";
 import { mockMarkets } from "./mockData";
 import { runSimulation1000 } from "./simEngine";
 import type { Market, SlipBet } from "./types";
@@ -35,8 +35,8 @@ function candidateStraightBets(markets: Market[], maxPerGame = 3): SlipBet[] {
       return fd.length ? fd : a;
     };
 
-    const lines = fdFirst(arr.filter((m) => !m.marketType.startsWith("player_")));
-    const props = fdFirst(arr.filter((m) => m.marketType.startsWith("player_")));
+    const lines = fdFirst(arr.filter((m) => !isPlayerPropMarketType(m.marketType)));
+    const props = fdFirst(arr.filter((m) => isPlayerPropMarketType(m.marketType)));
 
     const takeLines = lines.slice(0, maxPerGame);
     const takeProps = props.slice(0, maxPerGame);

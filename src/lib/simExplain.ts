@@ -1,3 +1,4 @@
+import { isPlayerPropMarketType } from "./odds";
 import { SlipBet } from "./types";
 import type { SimResult } from "./types";
 import type { GameHistoryContext } from "./simContext";
@@ -26,7 +27,7 @@ export function explainLeg(bet: SlipBet, r: SimResult, gameCtx?: GameHistoryCont
     whyMiss.push(`Simulated hit rate (${(hit * 100).toFixed(1)}%) sits below breakeven implied by the price (${(imp * 100).toFixed(1)}%).`);
   }
 
-  if (bet.marketType.startsWith("player_")) {
+  if (isPlayerPropMarketType(bet.marketType)) {
     whyHit.push("Player legs swing on matchup, lineup spot, and game script — sim injects variance around those factors.");
     whyMiss.push("Cold stretches, platoon sits, or early hook for the starter can crater a player prop even when the median looks fine.");
   } else {

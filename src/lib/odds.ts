@@ -42,3 +42,9 @@ export function isSportsbookLineSource(source: string): boolean {
   if (source === "book") return false;
   return true;
 }
+
+/** Model props use `player_hits`, etc.; The Rundown uses the umbrella type `player_prop`. */
+export function isPlayerPropMarketType(marketType: string): boolean {
+  const t = String(marketType ?? "").toLowerCase();
+  return t === "player_prop" || t.startsWith("player_");
+}

@@ -6,10 +6,11 @@ import { GameLinesRow, PlayerPropColumns } from "@/components/PlayerPropColumns"
 import { PlayerTabsBoard } from "@/components/PlayerTabsBoard";
 import { useBetStore } from "@/store/betStore";
 import { GameCard, Market, SlipBet } from "@/lib/types";
+import { isPlayerPropMarketType } from "@/lib/odds";
 import type { OddsDebugState } from "@/lib/theOddsFanDuel";
 
 function isPlayerMarket(m: Market) {
-  return m.marketType.startsWith("player_");
+  return isPlayerPropMarketType(m.marketType);
 }
 
 function gameFromUrl(): string | null {

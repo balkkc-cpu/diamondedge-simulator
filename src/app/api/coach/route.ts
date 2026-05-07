@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDailySchedule } from "@/lib/apiClients";
 import { rateLimit } from "@/lib/rateLimit";
-import { americanToDecimal, decimalToAmerican, isSportsbookLineSource } from "@/lib/odds";
+import { americanToDecimal, decimalToAmerican, isPlayerPropMarketType, isSportsbookLineSource } from "@/lib/odds";
 import { runSimulation1000 } from "@/lib/simEngine";
 import { buildPlayerPropsFromOddsEvents, fetchMlbOddsEvents, getOddsDebugState } from "@/lib/theOddsFanDuel";
 import { fetchRundownMarketsForToday, getRundownDebugState } from "@/lib/theRundown";
@@ -69,7 +69,7 @@ function marketMatchScore(m: Market, qWords: string[], statHints: string[]): num
   }
   if (m.playerName && qWords.some((w) => m.playerName!.toLowerCase().includes(w))) score += 2.5;
   if (statHints.includes(m.marketType)) score += 2;
-  if (m.marketType.startsWith("player_")) score += 1;
+  if (isPlayerPropMarketType(m.marketType)) score += 1;
   return score;
 }
 
@@ -260,7 +260,7 @@ function findPlayerPropsFromQuestion(markets: Market[], question: string): Marke
 }
 
 function topMarketsSnapshot(markets: Market[], count = 12): Market[] {
-  const player = markets.filter((m) => m.marketType.startsWith("player_"));
+  const player = markets.filter((m) => isPlayerPropMarketType(m.marketType));
   const core = player.length ? player : markets;
   return uniqueById(core).slice(0, count);
 }
@@ -341,9 +341,9 @@ export async function POST(req: NextRequest) {
     if (isRandomParlayAsk(q) || isAutoSuggestAsk(q)) {
       const req = parseParlayRequest(q);
       const legs = req.legs;
-      const sportsbookPlayerPool = uniqueById(markets.filter((m) => m.marketType.startsWith("player_"))).slice(0, 240);
+      const sportsbookPlayerPool = uniqueById(markets.filter((m) => isPlayerPropMarketType(m.marketType))).slice(0, 240);
       const sportsbookAnyPool = uniqueById(markets).slice(0, 260);
-      const slipPlayerPool = uniqueById((payload.bets ?? []).map(toMarketFromSlipBet).filter((m) => m.marketType.startsWith("player_")));
+      const slipPlayerPool = uniqueById((payload.bets ?? []).map(toMarketFromSlipBet).filter((m) => isPlayerPropMarketType(m.marketType)));
       // Strict odds policy: sportsbook live feed first, user manual overrides second; no model pool fallback.
       const propPool = sportsbookPlayerPool.length
         ? sportsbookPlayerPool
@@ -477,7 +477,7 @@ export async function POST(req: NextRequest) {
     const dbg = provider === "rundown" ? getRundownDebugState() : getOddsDebugState();
     const slipSnapshot = uniqueById((payload.bets ?? []).map(toMarketFromSlipBet));
     const broadPool = uniqueById(
-      [...markets.filter((m) => m.marketType.startsWith("player_")), ...slipSnapshot.filter((m) => m.marketType.startsWith("player_"))]
+      [...markets.filter((m) => isPlayerPropMarketType(m.marketType)), ...slipSnapshot.filter((m) => isPlayerPropMarketType(m.marketType))]
     );
     if (broadPool.length >= 2) {
       const legs = Math.min(4, Math.max(2, broadPool.length >= 3 ? 3 : 2));

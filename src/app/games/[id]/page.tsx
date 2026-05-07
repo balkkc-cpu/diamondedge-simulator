@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { getDailySchedule, getGameDetail, getOddsMarkets } from "@/lib/apiClients";
+import { isPlayerPropMarketType } from "@/lib/odds";
 import { GameCard, GameDetail, Market } from "@/lib/types";
 
 export default async function GameDetailPage({ params }: { params: { id: string } }) {
   const games: GameCard[] = await getDailySchedule();
   const game = games.find((g) => g.id === params.id) ?? games[0];
   const allForGame: Market[] = await getOddsMarkets(game?.id ?? "mock-game-001");
-  const lineMarkets = allForGame.filter((m) => !m.marketType.startsWith("player_"));
+  const lineMarkets = allForGame.filter((m) => !isPlayerPropMarketType(m.marketType));
   const propCount = allForGame.length - lineMarkets.length;
   const detail: GameDetail = await getGameDetail(game?.id ?? "mock-game-001");
 

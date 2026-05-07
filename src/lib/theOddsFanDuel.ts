@@ -4,6 +4,7 @@
  * Cached 10 minutes via `next: { revalidate: 600 }` on fetch.
  */
 
+import { isPlayerPropMarketType } from "./odds";
 import { GameCard, Market } from "./types";
 import { HITTER_MATRIX, PITCHER_MATRIX, type PickKind, type StatKey } from "./playerPropCatalog";
 
@@ -1009,7 +1010,7 @@ export function mergeFanDuelPrices(markets: Market[], games: GameCard[], events:
       return m;
     }
 
-    if (m.marketType.startsWith("player_")) {
+    if (isPlayerPropMarketType(m.marketType)) {
       const stat = m.statKey ?? m.marketType.replace(/^player_/, "");
       const apiKey = PLAYER_MARKET_KEYS[stat];
       if (!apiKey) return m;

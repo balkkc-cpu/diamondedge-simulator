@@ -1,3 +1,4 @@
+import { isPlayerPropMarketType } from "./odds";
 import type { GameCard, Market } from "./types";
 import {
   bookPropCodeFromRundownDef,
@@ -359,13 +360,13 @@ export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promi
 
     let out = ingestRundownEvents(primary.events, games, metaByMarketId, date);
 
-    const propRowsNow = () => out.filter((m) => m.marketType === "player_prop" || m.marketType.startsWith("player_"));
+    const propRowsNow = () => out.filter((m) => isPlayerPropMarketType(m.marketType));
 
     if (propRowsNow().length === 0 && affiliateIds) {
       const bare = await fetchRundownEventsPage(sportId, date, offset, marketIdsParam, key, undefined);
       if (bare.ok && bare.events.length) {
         const alt = ingestRundownEvents(bare.events, games, metaByMarketId, date);
-        const altProps = alt.filter((m) => m.marketType === "player_prop" || m.marketType.startsWith("player_"));
+        const altProps = alt.filter((m) => isPlayerPropMarketType(m.marketType));
         if (altProps.length > propRowsNow().length) out = alt;
       }
     }
@@ -390,7 +391,7 @@ export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promi
       }
     }
 
-    const propRows = out.filter((m) => m.marketType === "player_prop" || m.marketType.startsWith("player_"));
+    const propRows = out.filter((m) => isPlayerPropMarketType(m.marketType));
     setRundownDebug({
       status: out.length ? "ok" : "no_events",
       detail: `${out.length} priced rows · ${propRows.length} player-prop rows · ${primary.events.length} events (primary) · catalog http ${catalogHttpStatus} · proposition defs ${catalogPropositions} · merged market_ids ${marketIdsParam.split(",").length} (discovered prop ids ${discoveredPropIds.length})`

@@ -1,4 +1,5 @@
 import type { Market } from "./types";
+import { isPlayerPropMarketType } from "./odds";
 
 /** Affiliate id embedded in `source` as `rundown:19`. */
 export function rundownAffiliateFromSource(source: string): string | null {
@@ -21,7 +22,7 @@ function retailGameLineTypes(): Set<string> {
 }
 
 function isPlayerBoardMarket(m: Market): boolean {
-  return m.marketType.startsWith("player_");
+  return isPlayerPropMarketType(m.marketType);
 }
 
 function retailDedupeKey(m: Market): string {

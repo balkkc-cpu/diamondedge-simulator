@@ -1,5 +1,5 @@
 import { mockGameDetails, mockGames, mockMarkets } from "./mockData";
-import { impliedProbabilityFromAmerican, isSportsbookLineSource } from "./odds";
+import { impliedProbabilityFromAmerican, isPlayerPropMarketType, isSportsbookLineSource } from "./odds";
 import { buildPlayerPropMarkets } from "./rosterProps";
 import { buildPlayerPropsFromOddsEvents, fetchMlbOddsEvents, mergeFanDuelPrices } from "./theOddsFanDuel";
 import { fetchRundownMarketsForToday } from "./theRundown";
@@ -115,8 +115,10 @@ function clampAmerican(n: number): number {
 }
 
 function baselineBookAmericanForProp(m: Market): number | null {
-  if (!m.marketType.startsWith("player_")) return null;
-  const stat = String(m.statKey ?? m.marketType.replace(/^player_/, "")).toLowerCase();
+  if (!isPlayerPropMarketType(m.marketType)) return null;
+  const stat = String(
+    m.statKey ?? (m.marketType.toLowerCase() === "player_prop" ? "" : m.marketType.replace(/^player_/, ""))
+  ).toLowerCase();
   const line = Number(m.line ?? 0);
   const sel = m.selection.toLowerCase();
   const isOver = sel.includes("over");
@@ -194,7 +196,7 @@ function calibrateModelPlayerPropsFromLiveLines(markets: Market[]): Market[] {
   }
 
   return markets.map((m) => {
-    if (!m.marketType.startsWith("player_")) return m;
+    if (!isPlayerPropMarketType(m.marketType)) return m;
     if (isSportsbookLineSource(m.source)) return m; // preserve true book props
 
     const gm = byGame.get(m.gameId) ?? [];
