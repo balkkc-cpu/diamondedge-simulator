@@ -15,3 +15,5 @@ mobile/dist
 .env*.local
 .env.db.deploy
 .env.vercel.pulled
+.env.vercel.pull
+.env.vercel.pull.dev

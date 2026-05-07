@@ -1,5 +1,6 @@
 import { getAllMarkets, getDailySchedule } from "./apiClients";
 import { isSportsbookLineSource } from "./odds";
+import { mockMarkets } from "./mockData";
 import { runSimulation1000 } from "./simEngine";
 import type { Market, SlipBet } from "./types";
 
@@ -77,7 +78,20 @@ export async function getDailyPicksPayload(): Promise<{
 }> {
   const games = await getDailySchedule();
   const markets = await getAllMarkets();
-  const candidates = candidateStraightBets(markets, 3);
+
+  // Focus on markets in a reasonable price band around even money.
+  const priced = markets.filter((m) => m.american >= -150 && m.american <= 150);
+  const sportsbookFirst = priced.filter((m) => isSportsbookLineSource(m.source));
+  const baseBoard = sportsbookFirst.length ? sportsbookFirst : priced.length ? priced : markets;
+
+  let candidates = candidateStraightBets(baseBoard, 3);
+
+  // If the real board is empty (off-days / no odds), fall back to mock board
+  // so the widget never shows up completely blank.
+  if (!candidates.length) {
+    const mockBoard = mockMarkets.filter((m) => m.marketType !== "yrfi" && m.marketType !== "nrfi");
+    candidates = candidateStraightBets(mockBoard, 3);
+  }
   if (!candidates.length) {
     return { generatedAt: new Date().toISOString(), gamesCount: games.length, picks: [] };
   }

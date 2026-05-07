@@ -176,27 +176,56 @@ function mergeEventsById(lists: unknown[][]): unknown[] {
 
 const PLAYER_PROP_API_KEYS = new Set([
   "batter_hits",
+  "batter_hits_alternate",
   "batter_home_runs",
   "batter_home_runs_alternate",
   "batter_total_bases",
+  "batter_total_bases_alternate",
   "batter_rbis",
+  "batter_rbis_alternate",
   "batter_runs_scored",
+  "batter_runs_scored_alternate",
   "batter_hits_runs_rbis",
+  "batter_hits_runs_rbis_alternate",
   "pitcher_strikeouts",
+  "pitcher_strikeouts_alternate",
   "batter_walks"
+  ,"batter_walks_alternate"
 ]);
 
 const API_KEY_TO_STAT: Record<string, StatKey | undefined> = {
   batter_hits: "hits",
+  batter_hits_alternate: "hits",
   batter_home_runs: "hr",
   batter_home_runs_alternate: "hr",
   batter_total_bases: "tb",
+  batter_total_bases_alternate: "tb",
   batter_rbis: "rbi",
+  batter_rbis_alternate: "rbi",
   batter_runs_scored: "runs",
+  batter_runs_scored_alternate: "runs",
   batter_hits_runs_rbis: "hrr",
+  batter_hits_runs_rbis_alternate: "hrr",
   pitcher_strikeouts: "k",
-  batter_walks: "walks"
+  pitcher_strikeouts_alternate: "k",
+  batter_walks: "walks",
+  batter_walks_alternate: "walks"
 };
+
+function apiKeyToStat(apiKey: string): StatKey | undefined {
+  const k = apiKey.toLowerCase();
+  const mapped = API_KEY_TO_STAT[k];
+  if (mapped) return mapped;
+  if (k.includes("strikeout")) return "k";
+  if (k.includes("home_run")) return "hr";
+  if (k.includes("total_bases")) return "tb";
+  if (k.includes("hits_runs_rbis")) return "hrr";
+  if (k.includes("runs_scored")) return "runs";
+  if (k.includes("rbis")) return "rbi";
+  if (k.includes("walk")) return "walks";
+  if (k.includes("batter_hits")) return "hits";
+  return undefined;
+}
 
 function statLabel(stat: StatKey): string {
   return stat === "k" ? PITCHER_MATRIX.k.label : HITTER_MATRIX[stat as Exclude<StatKey, "k">].label;
@@ -216,8 +245,7 @@ export function buildPlayerPropsFromOddsEvents(events: unknown[], games: GameCar
       for (const mRaw of mkts) {
         const mk = mRaw as { key?: string; outcomes?: OddsOutcome[] };
         const apiKey = mk.key ?? "";
-        if (!PLAYER_PROP_API_KEYS.has(apiKey)) continue;
-        const stat = API_KEY_TO_STAT[apiKey];
+        const stat = apiKeyToStat(apiKey);
         if (!stat) continue;
 
         for (const o of mk.outcomes ?? []) {
@@ -269,28 +297,191 @@ function idSlug(s: string, max = 36): string {
   return s.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, max);
 }
 
-const CORE_MARKETS =
-  "h2h,spreads,totals,h2h_1st_5_innings,totals_1st_1_innings,team_totals,alternate_team_totals";
-const PLAYER_MARKETS =
-  "batter_hits,batter_home_runs,batter_home_runs_alternate,batter_total_bases,batter_rbis,batter_runs_scored,batter_hits_runs_rbis,pitcher_strikeouts,batter_walks";
+/** Allowed on bulk GET /odds — see https://the-odds-api.com/liveapi/guides/v4/api-error-codes.html#invalid-market */
+const FEATURED_MARKETS = "h2h,spreads,totals";
+const LIVE_REGIONS = "us,us2,eu,uk,au";
+const EVENT_REGIONS = "us";
 
-/** When core requests only have ML/spreads/totals, graft a player-only Odds API pull onto matching game IDs. */
-async function augmentEventsWithStandalonePlayerOdds(events: unknown[]): Promise<unknown[]> {
-  const k = process.env.ODDS_API_KEY?.trim();
-  if (!k || !events.length) return events;
-  const url =
-    "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds" +
-    `?apiKey=${encodeURIComponent(k)}&regions=us&oddsFormat=american&markets=${PLAYER_MARKETS}`;
+/** Alternate / period / team markets — require per-event odds endpoint */
+const EXTENDED_CORE_MARKETS =
+  "h2h_1st_5_innings,totals_1st_1_innings,team_totals,alternate_team_totals";
+
+const PLAYER_MARKETS =
+  "batter_hits,batter_hits_alternate,batter_home_runs,batter_home_runs_alternate,batter_total_bases,batter_total_bases_alternate,batter_rbis,batter_rbis_alternate,batter_runs_scored,batter_runs_scored_alternate,batter_hits_runs_rbis,batter_hits_runs_rbis_alternate,pitcher_strikeouts,pitcher_strikeouts_alternate,batter_walks,batter_walks_alternate";
+
+const MLB_NONFEATURED_MARKETS_COMBINED = `${EXTENDED_CORE_MARKETS},${PLAYER_MARKETS}`;
+const LAST_GOOD_TTL_MS = 1000 * 60 * 60 * 6; // 6h stale-while-provider-down
+let lastGoodMlbEvents: { events: unknown[]; at: number } | null = null;
+let cachedMlbSportKey: { key: string; at: number } | null = null;
+
+/**
+ * Bulk /baseball_mlb/odds only accepts featured markets. Player + alternate props are on
+ * GET /events/{eventId}/odds (multiple markets/regions billed per Odds API usage rules).
+ */
+async function fetchSingleEventExtraOdds(
+  apiKey: string,
+  sportKey: string,
+  eventId: string,
+  markets: string,
+  books: boolean
+): Promise<unknown | null> {
+  let q =
+    `apiKey=${encodeURIComponent(apiKey)}&regions=${encodeURIComponent(EVENT_REGIONS)}&oddsFormat=american&markets=${encodeURIComponent(markets)}`;
+  if (books) q += "&bookmakers=fanduel,draftkings";
+  const url = `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(sportKey)}/events/${encodeURIComponent(eventId)}/odds?${q}`;
+  const res = await fetch(url, { next: { revalidate: REVALIDATE_SEC } });
+  if (!res.ok) return null;
   try {
-    const res = await fetch(url, { next: { revalidate: REVALIDATE_SEC } });
-    if (!res.ok) return events;
-    const extra = (await res.json()) as unknown[];
-    if (!Array.isArray(extra) || !extra.length) return events;
-    const combined = mergeEventsById([events, extra]);
-    return combined.length ? combined : events;
+    const j = (await res.json()) as Record<string, unknown>;
+    return j && typeof j === "object" && Array.isArray(j.bookmakers) ? j : null;
   } catch {
-    return events;
+    return null;
   }
+}
+
+async function fetchSingleEventMarketKeys(apiKey: string, sportKey: string, eventId: string): Promise<string[]> {
+  const url =
+    `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(sportKey)}/events/${encodeURIComponent(eventId)}/markets` +
+    `?apiKey=${encodeURIComponent(apiKey)}&regions=${encodeURIComponent(EVENT_REGIONS)}`;
+  const res = await fetch(url, { next: { revalidate: REVALIDATE_SEC } });
+  if (!res.ok) return [];
+  const payload = (await res.json()) as { bookmakers?: Array<{ markets?: Array<{ key?: string }> }> };
+  const keys = new Set<string>();
+  for (const bk of payload.bookmakers ?? []) {
+    for (const m of bk.markets ?? []) {
+      const k = String(m.key ?? "").trim().toLowerCase();
+      if (!k) continue;
+      if (
+        k.startsWith("batter_") ||
+        k.startsWith("pitcher_") ||
+        k === "team_totals" ||
+        k === "alternate_team_totals" ||
+        k === "h2h_1st_5_innings" ||
+        k === "totals_1st_1_innings"
+      ) {
+        keys.add(k);
+      }
+    }
+  }
+  return [...keys];
+}
+
+async function fetchEventListBase(apiKey: string, sportKey: string): Promise<Array<Record<string, unknown>>> {
+  const url = `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(sportKey)}/events?apiKey=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, { next: { revalidate: REVALIDATE_SEC } });
+  if (!res.ok) return [];
+  const out = (await res.json()) as unknown[];
+  return Array.isArray(out) ? (out as Array<Record<string, unknown>>) : [];
+}
+
+async function resolveMlbSportKey(apiKey: string): Promise<string> {
+  if (cachedMlbSportKey && Date.now() - cachedMlbSportKey.at < 1000 * 60 * 60) return cachedMlbSportKey.key;
+  const fallback = "baseball_mlb";
+  try {
+    const res = await fetch(`https://api.the-odds-api.com/v4/sports?apiKey=${encodeURIComponent(apiKey)}`, {
+      next: { revalidate: REVALIDATE_SEC }
+    });
+    if (!res.ok) return fallback;
+    const sports = (await res.json()) as Array<{ key?: string; active?: boolean }>;
+    const keys = (sports ?? [])
+      .filter((s) => s.active !== false)
+      .map((s) => String(s.key ?? ""))
+      .filter((k) => /^baseball_mlb($|_)/.test(k));
+    const tryKeys = keys.length ? keys : [fallback, "baseball_mlb_preseason", "baseball_mlb_postseason"];
+    for (const k of tryKeys) {
+      const ev = await fetchEventListBase(apiKey, k);
+      if (ev.length) {
+        cachedMlbSportKey = { key: k, at: Date.now() };
+        return k;
+      }
+    }
+    cachedMlbSportKey = { key: fallback, at: Date.now() };
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function recoverEventsFromEventOddsEndpoint(apiKey: string, sportKey: string): Promise<unknown[]> {
+  const base = await fetchEventListBase(apiKey, sportKey);
+  if (!base.length) return [];
+  const maxRaw = Number(process.env.MLB_EVENT_RECOVERY_MAX ?? "18");
+  const maxEvents = Math.max(1, Math.min(Number.isFinite(maxRaw) ? maxRaw : 18, base.length));
+  const ids = base.slice(0, maxEvents);
+
+  const out: unknown[] = [];
+  for (const ev of ids) {
+    const id = String(ev.id ?? "").trim();
+    if (!id) continue;
+    let featured = await fetchSingleEventExtraOdds(apiKey, sportKey, id, FEATURED_MARKETS, true);
+    if (!featured) featured = await fetchSingleEventExtraOdds(apiKey, sportKey, id, FEATURED_MARKETS, false);
+    if (featured) out.push(mergeEventsById([[ev], [featured]])[0] ?? featured);
+  }
+  return out;
+}
+
+async function recoverEventsFromUpcomingOdds(apiKey: string): Promise<unknown[]> {
+  const base =
+    "https://api.the-odds-api.com/v4/sports/upcoming/odds" +
+    `?apiKey=${encodeURIComponent(apiKey)}&regions=${encodeURIComponent(LIVE_REGIONS)}&oddsFormat=american&markets=${FEATURED_MARKETS}`;
+  const res = await fetch(base, { next: { revalidate: REVALIDATE_SEC } });
+  if (!res.ok) return [];
+  const out = (await res.json()) as Array<Record<string, unknown>>;
+  if (!Array.isArray(out) || !out.length) return [];
+  return out.filter((e) => /^baseball_mlb($|_)/.test(String(e.sport_key ?? "")));
+}
+
+/** Merge extras from event-odds into the featured bulk row for one game. */
+async function mergeNonFeaturedForOneEvent(apiKey: string, sportKey: string, ev: Record<string, unknown>): Promise<unknown> {
+  const id = String(ev.id ?? "").trim();
+  if (!id) return ev;
+
+  for (const books of [true, false]) {
+    let detail = await fetchSingleEventExtraOdds(apiKey, sportKey, id, MLB_NONFEATURED_MARKETS_COMBINED, books);
+    if (detail) return mergeEventsById([[ev], [detail]])[0] ?? ev;
+
+    const ext = await fetchSingleEventExtraOdds(apiKey, sportKey, id, EXTENDED_CORE_MARKETS, books);
+    const pl = await fetchSingleEventExtraOdds(apiKey, sportKey, id, PLAYER_MARKETS, books);
+    const slices: unknown[] = [];
+    if (ext) slices.push(ext);
+    if (pl) slices.push(pl);
+    if (slices.length) {
+      let acc: unknown = ev;
+      for (const part of slices) {
+        acc = mergeEventsById([[acc as Record<string, unknown>], [part as Record<string, unknown>]])[0] ?? acc;
+      }
+      return acc;
+    }
+
+    // Final attempt: discover live market keys for this event/book and fetch exactly those.
+    const discovered = await fetchSingleEventMarketKeys(apiKey, sportKey, id);
+    if (discovered.length) {
+      const joined = discovered.slice(0, 45).join(",");
+      const dyn = await fetchSingleEventExtraOdds(apiKey, sportKey, id, joined, books);
+      if (dyn) return mergeEventsById([[ev], [dyn]])[0] ?? dyn;
+    }
+  }
+
+  return ev;
+}
+
+async function enrichMlbEventsWithPerEventOdds(apiKey: string, sportKey: string, events: unknown[]): Promise<unknown[]> {
+  if (!events.length) return events;
+  const maxRaw = Number(process.env.MLB_EVENT_ODDS_MAX ?? "28");
+  const maxMerge = Math.max(1, Math.min(Number.isFinite(maxRaw) ? maxRaw : 28, events.length));
+  const concRaw = Number(process.env.MLB_EVENT_ODDS_CONCURRENCY ?? "6");
+  const concurrency = Math.max(1, Math.min(Number.isFinite(concRaw) ? concRaw : 6, maxMerge));
+
+  const head = events.slice(0, maxMerge).map((e) => e as Record<string, unknown>);
+  const tail = events.slice(maxMerge);
+
+  const enriched: unknown[] = [];
+  for (let i = 0; i < head.length; i += concurrency) {
+    const batch = head.slice(i, i + concurrency);
+    const merged = await Promise.all(batch.map((ev) => mergeNonFeaturedForOneEvent(apiKey, sportKey, ev)));
+    enriched.push(...merged);
+  }
+  return enriched.length === events.length ? enriched : [...enriched, ...tail];
 }
 
 async function logOddsApiError(res: Response, tag: string): Promise<void> {
@@ -324,103 +515,137 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
     console.warn("[odds-api] ODDS_API_KEY missing; using model prices.");
     return [];
   }
+  const sportKey = await resolveMlbSportKey(key);
   const baseWithBooks =
-    "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds" +
-    `?apiKey=${encodeURIComponent(key)}&regions=us&oddsFormat=american&bookmakers=fanduel,draftkings`;
+    `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(sportKey)}/odds` +
+    `?apiKey=${encodeURIComponent(key)}&regions=${encodeURIComponent(LIVE_REGIONS)}&oddsFormat=american&bookmakers=fanduel,draftkings`;
   const baseAnyBook =
-    "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds" +
-    `?apiKey=${encodeURIComponent(key)}&regions=us&oddsFormat=american`;
+    `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(sportKey)}/odds` +
+    `?apiKey=${encodeURIComponent(key)}&regions=${encodeURIComponent(LIVE_REGIONS)}&oddsFormat=american`;
   const baseFeaturedWide =
-    "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds" +
-    `?apiKey=${encodeURIComponent(key)}&regions=us,us2,eu,uk,au&oddsFormat=american&markets=h2h,spreads,totals`;
-  const allMarkets = `${CORE_MARKETS},${PLAYER_MARKETS}`;
-  try {
-    const res = await fetch(`${baseWithBooks}&markets=${allMarkets}`, { next: { revalidate: REVALIDATE_SEC } });
-    if (res.ok) {
-      const out = (await res.json()) as unknown[];
-      setOddsDebug({
-        status: out.length ? "ok" : "no_events",
-        detail: out.length ? `combined request ok (${out.length} events)` : "combined request returned 0 events",
-        remaining: res.headers.get("x-requests-remaining") ?? undefined,
-        used: res.headers.get("x-requests-used") ?? undefined
-      });
-      return await augmentEventsWithStandalonePlayerOdds(out);
-    }
-    await logOddsApiError(res, "combined");
-  } catch (e) {
-    setOddsDebug({
-      status: "exception",
-      detail: `combined fetch exception: ${e instanceof Error ? e.message : String(e)}`
-    });
-    /* fall through */
-  }
-  try {
-    const [a, b] = await Promise.all([
-      fetch(`${baseWithBooks}&markets=${CORE_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } }),
-      fetch(`${baseWithBooks}&markets=${PLAYER_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } })
-    ]);
-    if (!a.ok) await logOddsApiError(a, "core");
-    if (!b.ok) await logOddsApiError(b, "player");
-    const ja = a.ok ? ((await a.json()) as unknown[]) : [];
-    const jb = b.ok ? ((await b.json()) as unknown[]) : [];
-    const merged = mergeEventsById([ja, jb]);
-    if (!merged.length) {
-      // Some plans/regions return empty when a strict bookmaker filter is applied.
-      // Retry without the filter and use whichever books are available.
-      const [c, d] = await Promise.all([
-        fetch(`${baseAnyBook}&markets=${CORE_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } }),
-        fetch(`${baseAnyBook}&markets=${PLAYER_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } })
-      ]);
-      if (!c.ok) await logOddsApiError(c, "core-any-book");
-      if (!d.ok) await logOddsApiError(d, "player-any-book");
-      const jc = c.ok ? ((await c.json()) as unknown[]) : [];
-      const jd = d.ok ? ((await d.json()) as unknown[]) : [];
-      const mergedAny = mergeEventsById([jc, jd]);
-      if (mergedAny.length) {
-        setOddsDebug({
-          status: "ok",
-          detail: `fallback any-book request ok (${mergedAny.length} merged events)`,
-          remaining: c.headers.get("x-requests-remaining") ?? d.headers.get("x-requests-remaining") ?? undefined,
-          used: c.headers.get("x-requests-used") ?? d.headers.get("x-requests-used") ?? undefined
-        });
-        return await augmentEventsWithStandalonePlayerOdds(mergedAny);
+    `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(sportKey)}/odds` +
+    `?apiKey=${encodeURIComponent(key)}&regions=${encodeURIComponent(LIVE_REGIONS)}&oddsFormat=american&markets=${FEATURED_MARKETS}`;
+  async function loadFeaturedFeatured(): Promise<unknown[]> {
+    try {
+      const res = await fetch(`${baseWithBooks}&markets=${FEATURED_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } });
+      if (res.ok) {
+        const out = (await res.json()) as unknown[];
+        if (out.length)
+          setOddsDebug({
+            status: "ok",
+            detail: `featured bulk (${out.length} events) FanDuel/DK`,
+            remaining: res.headers.get("x-requests-remaining") ?? undefined,
+            used: res.headers.get("x-requests-used") ?? undefined
+          });
+        return Array.isArray(out) ? out : [];
       }
-      // Final fallback: featured markets only, broader regions.
-      const wide = await fetch(baseFeaturedWide, { next: { revalidate: REVALIDATE_SEC } });
-      if (!wide.ok) await logOddsApiError(wide, "featured-wide");
-      const wideEvents = wide.ok ? ((await wide.json()) as unknown[]) : [];
-      if (wideEvents.length) {
-        setOddsDebug({
-          status: "ok",
-          detail: `featured-wide fallback ok (${wideEvents.length} events)`,
-          remaining: wide.headers.get("x-requests-remaining") ?? undefined,
-          used: wide.headers.get("x-requests-used") ?? undefined
-        });
-        return await augmentEventsWithStandalonePlayerOdds(wideEvents);
-      }
+      await logOddsApiError(res, "featured-books");
+    } catch (e) {
       setOddsDebug({
-        status: "no_events",
-        detail: "all fallbacks returned 0 events",
-        remaining: a.headers.get("x-requests-remaining") ?? b.headers.get("x-requests-remaining") ?? undefined,
-        used: a.headers.get("x-requests-used") ?? b.headers.get("x-requests-used") ?? undefined
-      });
-      console.warn("[odds-api] no MLB events returned; using model prices.");
-    } else {
-      setOddsDebug({
-        status: "ok",
-        detail: `split requests ok (${merged.length} merged events)`,
-        remaining: a.headers.get("x-requests-remaining") ?? b.headers.get("x-requests-remaining") ?? undefined,
-        used: a.headers.get("x-requests-used") ?? b.headers.get("x-requests-used") ?? undefined
+        status: "exception",
+        detail: `featured-books exception: ${e instanceof Error ? e.message : String(e)}`
       });
     }
-    return await augmentEventsWithStandalonePlayerOdds(merged);
-  } catch (e) {
-    setOddsDebug({
-      status: "exception",
-      detail: `split fetch exception: ${e instanceof Error ? e.message : String(e)}`
-    });
     return [];
   }
+
+  let events = await loadFeaturedFeatured();
+  if (!events.length) {
+    try {
+      const res = await fetch(`${baseAnyBook}&markets=${FEATURED_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } });
+      if (res.ok) {
+        events = (await res.json()) as unknown[];
+        if (events.length) {
+          setOddsDebug({
+            status: "ok",
+            detail: `featured bulk (${events.length} events) any-book US`,
+            remaining: res.headers.get("x-requests-remaining") ?? undefined,
+            used: res.headers.get("x-requests-used") ?? undefined
+          });
+        }
+      } else await logOddsApiError(res, "featured-any-book");
+    } catch (e) {
+      setOddsDebug({
+        status: "exception",
+        detail: `featured-any-book exception: ${e instanceof Error ? e.message : String(e)}`
+      });
+    }
+  }
+
+  if (!events.length) {
+    try {
+      const wide = await fetch(baseFeaturedWide, { next: { revalidate: REVALIDATE_SEC } });
+      if (wide.ok) {
+        events = (await wide.json()) as unknown[];
+        if (events.length)
+          setOddsDebug({
+            status: "ok",
+            detail: `featured-wide (${events.length} events)`,
+            remaining: wide.headers.get("x-requests-remaining") ?? undefined,
+            used: wide.headers.get("x-requests-used") ?? undefined
+          });
+      } else await logOddsApiError(wide, "featured-wide");
+    } catch (e) {
+      setOddsDebug({
+        status: "exception",
+        detail: `featured-wide exception: ${e instanceof Error ? e.message : String(e)}`
+      });
+    }
+  }
+
+  if (!events.length) {
+    // If provider is rejecting requests (e.g. out of usage credits), don't mask
+    // it as "no events" — preserve the actual upstream error state.
+    if (
+      lastOddsDebug.status === "http_error" &&
+      /OUT_OF_USAGE_CREDITS|Usage quota has been reached/i.test(String(lastOddsDebug.detail ?? ""))
+    ) {
+      return [];
+    }
+
+    const upcomingRecovered = await recoverEventsFromUpcomingOdds(key).catch(() => []);
+    if (upcomingRecovered.length) {
+      const enriched = await enrichMlbEventsWithPerEventOdds(key, sportKey, upcomingRecovered);
+      if (enriched.length) {
+        lastGoodMlbEvents = { events: enriched, at: Date.now() };
+        setOddsDebug({
+          status: "ok",
+          detail: `recovered from /sports/upcoming/odds (${enriched.length} MLB events)`
+        });
+        return enriched;
+      }
+    }
+
+    const recovered = await recoverEventsFromEventOddsEndpoint(key, sportKey).catch(() => []);
+    if (recovered.length) {
+      const enriched = await enrichMlbEventsWithPerEventOdds(key, sportKey, recovered);
+      lastGoodMlbEvents = { events: enriched, at: Date.now() };
+      setOddsDebug({
+        status: "ok",
+        detail: `recovered from /events/{id}/odds (${enriched.length} events)`
+      });
+      return enriched;
+    }
+
+    if (lastGoodMlbEvents && Date.now() - lastGoodMlbEvents.at < LAST_GOOD_TTL_MS) {
+      setOddsDebug({
+        status: "ok",
+        detail: `provider empty; using cached board snapshot (${lastGoodMlbEvents.events.length} events)`
+      });
+      return lastGoodMlbEvents.events;
+    }
+
+    setOddsDebug({
+      status: "no_events",
+      detail: "no MLB featured events from Odds API"
+    });
+    console.warn("[odds-api] no MLB events returned; using model prices.");
+    return [];
+  }
+
+  const enriched = await enrichMlbEventsWithPerEventOdds(key, sportKey, events);
+  if (enriched.length) lastGoodMlbEvents = { events: enriched, at: Date.now() };
+  return enriched;
 }
 
 function marketList(ev: Record<string, unknown>): unknown[] {

@@ -25,7 +25,7 @@ export default function BetBuilderPage() {
 
   const [data, setData] = useState<{ games: GameCard[]; allMarkets: Market[]; oddsDebug?: OddsDebugState } | null>(null);
   const [gameId, setGameId] = useState<string>("mock-game-001");
-  const [marketFilter, setMarketFilter] = useState<"all" | "lines" | "players_tabs" | "players_columns">("players_tabs");
+  const [marketFilter, setMarketFilter] = useState<"all" | "lines" | "players_tabs" | "players_columns">("all");
   const [running, setRunning] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const { bets, addBet, loadSlip } = useBetStore();
@@ -70,13 +70,25 @@ export default function BetBuilderPage() {
   const lineMarkets = useMemo(() => forGame.filter((m) => !isPlayerMarket(m)), [forGame]);
   const playerMarkets = useMemo(() => forGame.filter((m) => isPlayerMarket(m)), [forGame]);
   const oddsDebug = data?.oddsDebug;
+  const noPlayerProps = playerMarkets.length === 0;
+
+  useEffect(() => {
+    if (!noPlayerProps) return;
+    if (marketFilter === "players_tabs" || marketFilter === "players_columns") {
+      setMarketFilter("all");
+    }
+  }, [noPlayerProps, marketFilter]);
 
   const oddsBadge = useMemo(() => {
     if (!oddsDebug) return null;
     if (oddsDebug.status === "ok") return { label: "LIVE ODDS OK", tone: "text-emerald-300 border-emerald-700/50 bg-emerald-950/30" };
     if (oddsDebug.status === "missing_key") return { label: "NO ODDS KEY", tone: "text-amber-300 border-amber-700/50 bg-amber-950/30" };
     if (oddsDebug.status === "http_error") return { label: `ODDS API ERROR ${oddsDebug.httpStatus ?? ""}`.trim(), tone: "text-rose-300 border-rose-700/50 bg-rose-950/30" };
-    if (oddsDebug.status === "no_events") return { label: "NO BOOK LINES RETURNED", tone: "text-amber-300 border-amber-700/50 bg-amber-950/30" };
+    if (oddsDebug.status === "no_events")
+      return {
+        label: "BOOK API EMPTY — NO LIVE LINES",
+        tone: "text-amber-300 border-amber-700/50 bg-amber-950/30"
+      };
     if (oddsDebug.status === "exception") return { label: "ODDS FETCH EXCEPTION", tone: "text-rose-300 border-rose-700/50 bg-rose-950/30" };
     return { label: "ODDS STATUS UNKNOWN", tone: "text-slate-300 border-slate-700/50 bg-slate-900/40" };
   }, [oddsDebug]);
@@ -178,13 +190,25 @@ export default function BetBuilderPage() {
 
         {(marketFilter === "all" || marketFilter === "players_tabs") && (
           <div className="-mx-1 px-1 pb-1">
-            <PlayerTabsBoard markets={playerMarkets} onAdd={addBet} />
+            {playerMarkets.length ? (
+              <PlayerTabsBoard markets={playerMarkets} onAdd={addBet} />
+            ) : (
+              <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-3 text-sm text-amber-200">
+                No sportsbook player props are available from your current provider/key. Showing game lines instead.
+              </div>
+            )}
           </div>
         )}
 
         {marketFilter === "players_columns" && (
           <div className="thin-scrollbar -mx-1 max-w-[100vw] overflow-x-auto px-1 pb-1">
-            <PlayerPropColumns markets={playerMarkets} onAdd={addBet} />
+            {playerMarkets.length ? (
+              <PlayerPropColumns markets={playerMarkets} onAdd={addBet} />
+            ) : (
+              <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-3 text-sm text-amber-200">
+                No sportsbook player props are available from your current provider/key. Showing game lines instead.
+              </div>
+            )}
           </div>
         )}
 

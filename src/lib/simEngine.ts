@@ -2,6 +2,7 @@ import { expectedValue, fractionalKellyUnits, impliedProbabilityFromAmerican } f
 import type { PickKind } from "./playerPropCatalog";
 import { explainLeg, type LegBreakdown } from "./simExplain";
 import { SimResult, SlipBet } from "./types";
+import type { GameHistoryContext } from "./simContext";
 
 type SimOptions = {
   iterations?: number;
@@ -10,6 +11,7 @@ type SimOptions = {
   offenseFactor?: number;
   injuryFactor?: number;
   variance?: number;
+  gameContextById?: Record<string, GameHistoryContext>;
 };
 
 export type SimulationOutput = {
@@ -50,8 +52,8 @@ function confidence(hitProb: number, edge: number): number {
 function stakePlan(hitProbability: number, implied: number, american: number, edge: number): { units: number; note: string } {
   if (edge <= 0) {
     return {
-      units: 0,
-      note: "No positive edge vs the posted American price on this sim run — suggested tag is 0 units (paper only)."
+      units: 0.1,
+      note: "No positive edge vs the posted American price on this sim run — keep it to a micro 0.1u tracker stake."
     };
   }
   if (edge < 0.015) {
@@ -172,6 +174,7 @@ export function runSimulation1000(bets: SlipBet[], options: SimOptions = {}): Si
   const offenseFactor = options.offenseFactor ?? 1;
   const injuryFactor = options.injuryFactor ?? 1;
   const variance = options.variance ?? 0.12;
+  const gameCtx = options.gameContextById ?? {};
 
   const simulatedHits = new Map<string, number>();
   bets.forEach((b) => simulatedHits.set(b.id, 0));
@@ -196,13 +199,17 @@ export function runSimulation1000(bets: SlipBet[], options: SimOptions = {}): Si
         base = (over ? (hitOver ? 0.62 : 0.28) : hitOver ? 0.32 : 0.58) * 0.5 + base * 0.5;
       }
 
-      const adjusted = clamp(base * weatherFactor * (2 - injuryFactor) + noise(variance));
+      const marketAnchor = impliedProbabilityFromAmerican(bet.oddsAmerican);
+      const blended = base * 0.72 + marketAnchor * 0.28;
+      const adjusted = clamp(blended * weatherFactor * (2 - injuryFactor) + noise(variance * 0.8));
       if (Math.random() < adjusted) simulatedHits.set(bet.id, (simulatedHits.get(bet.id) ?? 0) + 1);
     }
   }
 
   const results = bets.map((bet) => {
-    const hitProbability = (simulatedHits.get(bet.id) ?? 0) / iterations;
+    const hits = simulatedHits.get(bet.id) ?? 0;
+    // Laplace smoothing for less jumpy probabilities on small edges.
+    const hitProbability = (hits + 1) / (iterations + 2);
     const impliedProbability = impliedProbabilityFromAmerican(bet.oddsAmerican);
     const edge = hitProbability - impliedProbability;
     const ev = expectedValue(hitProbability, bet.oddsAmerican);
@@ -220,7 +227,7 @@ export function runSimulation1000(bets: SlipBet[], options: SimOptions = {}): Si
     } satisfies SimResult;
   });
 
-  const breakdowns = bets.map((bet, idx) => explainLeg(bet, results[idx]));
+  const breakdowns = bets.map((bet, idx) => explainLeg(bet, results[idx], gameCtx[bet.gameId]));
 
   const parlayHitProbability = results.reduce((acc, r) => acc * r.hitProbability, 1);
 

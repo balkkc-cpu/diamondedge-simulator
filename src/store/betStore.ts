@@ -10,6 +10,7 @@ type BetStore = {
   setBankroll: (bankroll: number) => void;
   setUnitSize: (unitSize: number) => void;
   addBet: (bet: SlipBet) => void;
+  updateBetOdds: (id: string, oddsAmerican: number) => void;
   removeBet: (id: string) => void;
   clear: () => void;
   /** Replace slip (e.g. load from My Library). */
@@ -25,6 +26,10 @@ export const useBetStore = create<BetStore>((set) => ({
   addBet: (bet) =>
     set((state) => ({
       bets: state.bets.some((b) => b.id === bet.id) ? state.bets : [...state.bets, bet]
+    })),
+  updateBetOdds: (id, oddsAmerican) =>
+    set((state) => ({
+      bets: state.bets.map((b) => (b.id === id ? { ...b, oddsAmerican } : b))
     })),
   removeBet: (id) => set((state) => ({ bets: state.bets.filter((b) => b.id !== id) })),
   clear: () => set({ bets: [] }),

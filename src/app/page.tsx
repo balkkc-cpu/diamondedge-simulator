@@ -1,15 +1,20 @@
 import Link from "next/link";
 import { getDailyPicksPayload } from "@/lib/dailyPicks";
-import { getDailySchedule, getInjuries, getWeatherFallback } from "@/lib/apiClients";
+import { getAllMarkets, getDailySchedule, getInjuries, getWeatherFallback } from "@/lib/apiClients";
 import { DashboardSuggestedPicks } from "@/components/DashboardSuggestedPicks";
 import { DonationCard } from "@/components/DonationCard";
 import { GameCard } from "@/lib/types";
+import { buildSuggestedParlaysFromBoard } from "@/lib/suggestedParlays";
+import { DashboardSuggestedParlays } from "@/components/DashboardSuggestedParlays";
+import { DashboardCoachTab } from "@/components/DashboardCoachTab";
 
 export default async function DashboardPage() {
   const games: GameCard[] = await getDailySchedule();
   const injuries = await getInjuries();
   const weather = await getWeatherFallback();
   const daily = await getDailyPicksPayload();
+  const allMarkets = await getAllMarkets();
+  const parlays = await buildSuggestedParlaysFromBoard({ games, markets: allMarkets, parlayLegs: 3 });
 
   return (
     <main className="grid gap-4">
@@ -21,7 +26,7 @@ export default async function DashboardPage() {
         </p>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
+      <section className="grid gap-4 lg:grid-cols-3 lg:items-stretch">
         <div className="panel flex flex-col p-4">
           <h3 className="mb-3 shrink-0 text-lg font-semibold text-slate-100">Today&apos;s MLB games</h3>
           <div className="thin-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
@@ -52,7 +57,10 @@ export default async function DashboardPage() {
         </div>
 
         <DashboardSuggestedPicks picks={daily.picks} />
+        <DashboardSuggestedParlays parlays={parlays} initialLegs={3} />
       </section>
+
+      <DashboardCoachTab />
 
       <section className="grid gap-4 md:grid-cols-2">
         <div className="panel p-4 text-sm">

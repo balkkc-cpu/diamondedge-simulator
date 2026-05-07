@@ -1,7 +1,8 @@
 import { mockGameDetails, mockGames, mockMarkets } from "./mockData";
-import { isSportsbookLineSource } from "./odds";
+import { impliedProbabilityFromAmerican, isSportsbookLineSource } from "./odds";
 import { buildPlayerPropMarkets } from "./rosterProps";
 import { buildPlayerPropsFromOddsEvents, fetchMlbOddsEvents, mergeFanDuelPrices } from "./theOddsFanDuel";
+import { fetchRundownMarketsForToday } from "./theRundown";
 import { GameCard, GameDetail, Market, PlayerCard } from "./types";
 
 const MLB_STATS_API = "https://statsapi.mlb.com/api/v1";
@@ -107,6 +108,135 @@ function generateMarketsForGame(game: GameCard): Market[] {
   ];
 }
 
+function clampAmerican(n: number): number {
+  const v = Math.round(n);
+  return Math.max(-450, Math.min(450, v));
+}
+
+function baselineBookAmericanForProp(m: Market): number | null {
+  if (!m.marketType.startsWith("player_")) return null;
+  const stat = String(m.statKey ?? m.marketType.replace(/^player_/, "")).toLowerCase();
+  const line = Number(m.line ?? 0);
+  const sel = m.selection.toLowerCase();
+  const isOver = sel.includes("over");
+  const isUnder = sel.includes("under");
+  const isTier = m.pickKind === "tier_plus";
+  const isYesNo = m.pickKind === "yes_no";
+
+  if (isYesNo && stat === "hr") {
+    if (sel.includes("(yes)")) return 290;
+    if (sel.includes("(no)")) return -420;
+  }
+
+  if (isTier) {
+    const t = Math.max(1, Math.round(line || 1));
+    if (stat === "hits") return t === 2 ? 165 : t >= 3 ? 520 : -170;
+    if (stat === "tb") return t === 2 ? 145 : t === 3 ? 275 : t >= 4 ? 650 : -190;
+    if (stat === "rbi") return t === 2 ? 260 : t >= 3 ? 700 : 125;
+    if (stat === "runs") return t === 2 ? 245 : t >= 3 ? 640 : 130;
+    if (stat === "hrr") return t === 2 ? -105 : t === 3 ? 165 : t >= 4 ? 420 : -160;
+    if (stat === "walks") return t === 2 ? 240 : 135;
+    if (stat === "k") return t >= 8 ? 280 : t >= 7 ? 170 : t >= 6 ? 110 : -105;
+  }
+
+  const ou = (over: number, under: number) => (isOver ? over : isUnder ? under : over);
+  if (stat === "hits") {
+    if (line <= 0.5) return ou(-185, 145);
+    if (line <= 1.5) return ou(128, -158);
+    return ou(290, -390);
+  }
+  if (stat === "tb") {
+    if (line <= 0.5) return ou(-210, 165);
+    if (line <= 1.5) return ou(112, -138);
+    if (line <= 2.5) return ou(210, -275);
+    return ou(420, -450);
+  }
+  if (stat === "rbi") {
+    if (line <= 0.5) return ou(122, -152);
+    if (line <= 1.5) return ou(285, -400);
+    return ou(700, -450);
+  }
+  if (stat === "runs") {
+    if (line <= 0.5) return ou(118, -148);
+    if (line <= 1.5) return ou(275, -385);
+    return ou(680, -450);
+  }
+  if (stat === "hrr") {
+    if (line <= 0.5) return ou(-235, 182);
+    if (line <= 1.5) return ou(-102, -122);
+    if (line <= 2.5) return ou(168, -218);
+    return ou(410, -450);
+  }
+  if (stat === "walks") {
+    if (line <= 0.5) return ou(128, -160);
+    return ou(265, -365);
+  }
+  if (stat === "k") {
+    if (line <= 3.5) return ou(-175, 138);
+    if (line <= 5.5) return ou(-108, -112);
+    if (line <= 7.5) return ou(158, -202);
+    return ou(325, -430);
+  }
+  if (stat === "hr") return isOver ? 300 : -430;
+  return null;
+}
+
+/**
+ * Re-price model player props from live game context when live board lines exist.
+ * This keeps simulated props better aligned with the market environment (totals/ML).
+ */
+function calibrateModelPlayerPropsFromLiveLines(markets: Market[]): Market[] {
+  const byGame = new Map<string, Market[]>();
+  for (const m of markets) {
+    if (!byGame.has(m.gameId)) byGame.set(m.gameId, []);
+    byGame.get(m.gameId)!.push(m);
+  }
+
+  return markets.map((m) => {
+    if (!m.marketType.startsWith("player_")) return m;
+    if (isSportsbookLineSource(m.source)) return m; // preserve true book props
+
+    const gm = byGame.get(m.gameId) ?? [];
+    const live = gm.filter((x) => isSportsbookLineSource(x.source));
+    if (!live.length) return m;
+
+    const totals = live.filter((x) => x.marketType === "total" && typeof x.line === "number");
+    const totalLine = totals.length
+      ? totals.reduce((acc, x) => acc + (x.line ?? 0), 0) / totals.length
+      : null;
+
+    const mls = live.filter((x) => x.marketType === "moneyline");
+    const probs = mls.map((x) => impliedProbabilityFromAmerican(x.american));
+    const avgMlProb = probs.length ? probs.reduce((a, b) => a + b, 0) / probs.length : 0.5;
+
+    // baseline environment tilt from live board
+    const envTilt = (totalLine != null ? (totalLine - 8) * 7 : 0) + (avgMlProb - 0.5) * 8;
+    const sel = m.selection.toLowerCase();
+    let delta = 0;
+
+    if (m.marketType === "player_k") {
+      // Higher totals usually imply tougher run environment for K overs.
+      if (sel.includes("over")) delta -= envTilt * 0.7;
+      if (sel.includes("under")) delta += envTilt * 0.7;
+      if (m.pickKind === "tier_plus") delta -= envTilt * 0.75;
+    } else if (m.marketType === "player_hr") {
+      // HR yes/no most sensitive to run environment.
+      if (m.pickKind === "yes_no" && sel.includes("(yes)")) delta += envTilt * 1.2;
+      else if (m.pickKind === "yes_no" && sel.includes("(no)")) delta -= envTilt * 1.2;
+      else if (sel.includes("over")) delta += envTilt;
+      else if (sel.includes("under")) delta -= envTilt;
+    } else {
+      if (sel.includes("over")) delta += envTilt;
+      if (sel.includes("under")) delta -= envTilt;
+      if (m.pickKind === "tier_plus") delta += envTilt * 0.9;
+    }
+
+    const baseline = baselineBookAmericanForProp(m);
+    const anchor = baseline != null ? baseline * 0.75 + m.american * 0.25 : m.american;
+    return { ...m, american: clampAmerican(anchor + delta) };
+  });
+}
+
 export async function getDailySchedule(): Promise<GameCard[]> {
   try {
     const today = mlbDateStringEt();
@@ -142,6 +272,14 @@ export async function getDailySchedule(): Promise<GameCard[]> {
 
 export async function getOddsMarkets(gameId: string): Promise<Market[]> {
   const games = await getDailySchedule();
+  const provider = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
+  if (provider === "rundown") {
+    const rundown = await fetchRundownMarketsForToday(games);
+    const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
+    const byGame = sportsbook.filter((m) => m.gameId === gameId);
+    // Provider-only mode: no model injection.
+    return byGame;
+  }
   const game = games.find((g) => g.id === gameId);
   if (!game) return mockMarkets.filter((m) => m.gameId === gameId);
   const base = generateMarketsForGame(game);
@@ -155,10 +293,23 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
     const apiPlayer = buildPlayerPropsFromOddsEvents(events, games).filter((m) => m.gameId === gameId);
     out = [...merged, ...apiPlayer];
   }
-  return useOddsProps ? out.filter((m) => isSportsbookLineSource(m.source)) : out;
+  if (useOddsProps) {
+    const sportsbook = out.filter((m) => isSportsbookLineSource(m.source));
+    // Strict sportsbook mode: never inject model/fallback when key/provider is configured.
+    return sportsbook;
+  }
+  return calibrateModelPlayerPropsFromLiveLines(out);
 }
 
 export async function getAllMarkets(): Promise<Market[]> {
+  const provider = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
+  if (provider === "rundown") {
+    const games = await getDailySchedule();
+    const rundown = await fetchRundownMarketsForToday(games);
+    // Provider-only mode: no model injection.
+    return rundown.filter((m) => isSportsbookLineSource(m.source));
+  }
+
   const games = await getDailySchedule();
   if (!games.length) return mockMarkets;
   const core = games.flatMap((g) => generateMarketsForGame(g));
@@ -169,9 +320,12 @@ export async function getAllMarkets(): Promise<Market[]> {
   const priced = mergeFanDuelPrices(merged, games, events);
   if (useOddsProps) {
     const apiPlayer = buildPlayerPropsFromOddsEvents(events, games);
-    return [...priced, ...apiPlayer].filter((m) => isSportsbookLineSource(m.source));
+    const out = [...priced, ...apiPlayer];
+    const sportsbook = out.filter((m) => isSportsbookLineSource(m.source));
+    // Strict sportsbook mode: never inject model/fallback when key/provider is configured.
+    return sportsbook;
   }
-  return priced;
+  return calibrateModelPlayerPropsFromLiveLines(priced);
 }
 
 export async function getWeatherFallback() {

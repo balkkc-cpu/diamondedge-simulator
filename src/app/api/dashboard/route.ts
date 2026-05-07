@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAllMarkets, getDailySchedule, getInjuries, getWeatherFallback } from "@/lib/apiClients";
 import { getOddsDebugState } from "@/lib/theOddsFanDuel";
+import { getRundownDebugState } from "@/lib/theRundown";
 import { rateLimit } from "@/lib/rateLimit";
 
 export async function GET(req: Request) {
@@ -20,6 +21,6 @@ export async function GET(req: Request) {
     allMarkets,
     injuries,
     weather,
-    oddsDebug: getOddsDebugState()
+    oddsDebug: String(process.env.ODDS_PROVIDER ?? "").toLowerCase() === "rundown" ? getRundownDebugState() : getOddsDebugState()
   });
 }

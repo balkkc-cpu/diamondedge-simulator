@@ -29,6 +29,10 @@ export type Market = {
   pickKind?: PickKind;
   /** For “2+ hits” style picks, minimum count to clear */
   tierMin?: number | null;
+  /** The Rundown market_id when propagates from that feed */
+  rundownMarketId?: number;
+  /** Retail-style prop key (snake_case), derived from Rundown names — not a sportsbook API */
+  bookPropCode?: string;
 };
 
 export type SlipBet = {

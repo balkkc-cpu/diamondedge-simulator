@@ -14,13 +14,35 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** Comma/semicolon-separated list; set in env (e.g. OWNER_NOTIFY_EMAIL=balkkc@gmail.com). */
+/** Comma/semicolon-separated list; strips quotes/Vercel copy-paste noise. */
 function ownerRecipients(): string[] {
   const raw =
     process.env.OWNER_NOTIFY_EMAIL?.trim() ||
     process.env.ADMIN_NOTIFY_EMAIL?.trim() ||
     "";
-  return raw.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+  if (!raw) return [];
+
+  const stripQuotes = (s: string) => s.trim().replace(/^\ufeff/, "").replace(/^["']+|["']+$/g, "").trim();
+
+  return raw
+    .split(/[,;\n\r]+/)
+    .map((s) => stripQuotes(s))
+    .filter((s) => {
+      if (!s || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) return false;
+      return true;
+    });
+}
+
+function summarizeResendErr(err: { message?: string; name?: string } | null | undefined): string {
+  if (!err) return "unknown_error";
+  return [err.name, err.message].filter(Boolean).join(": ");
+}
+
+function stripTagsForPlain(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 async function sendTransactionalEmail(opts: {
@@ -28,28 +50,50 @@ async function sendTransactionalEmail(opts: {
   subject: string;
   html: string;
   logFallback: string;
+  tags?: { name: string; value: string }[];
 }): Promise<SendMailResult> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM_EMAIL || "DiamondEdge <onboarding@resend.dev>";
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const from = process.env.RESEND_FROM_EMAIL?.trim() || "DiamondEdge <onboarding@resend.dev>";
+  const text = stripTagsForPlain(opts.html);
 
   if (!opts.to.length) return { delivered: false, fallback: false };
 
   if (!apiKey) {
-    console.log(`[DiamondEdge] (no RESEND_API_KEY) ${opts.logFallback}`);
-    return { delivered: false, fallback: true };
+    console.warn(
+      `[DiamondEdge] mail skipped — RESEND_API_KEY is not set (${opts.logFallback}). ` +
+        `OWNER_NOTIFY_EMAIL is ignored until Resend is configured.`
+    );
+    return { delivered: false, fallback: true, error: "RESEND_API_KEY missing" };
   }
 
   try {
     const resend = new Resend(apiKey);
-    const { error } = await resend.emails.send({
-      from,
-      to: opts.to,
-      subject: opts.subject,
-      html: opts.html
-    });
-    if (error) {
-      console.error("[DiamondEdge] Resend error:", error);
-      return { delivered: false, fallback: true, error: error.message ?? "Resend rejected the send" };
+    const failures: string[] = [];
+    let successCount = 0;
+    /** One POST per inbox — avoids one bad address rejecting the batch. */
+    for (const to of opts.to) {
+      const result = await resend.emails.send({
+        from,
+        to,
+        subject: opts.subject,
+        html: opts.html,
+        text,
+        ...(opts.tags?.length ? { tags: opts.tags } : {})
+      });
+      if (result.error) {
+        const msg = summarizeResendErr(result.error);
+        failures.push(`${to}:${msg}`);
+        console.error("[DiamondEdge] Resend rejected send:", msg);
+      } else if (result.data?.id) {
+        successCount += 1;
+        console.info(`[DiamondEdge] mail queued ok resend_id=${result.data.id} to=${to}`);
+      }
+    }
+    if (successCount === 0) {
+      return { delivered: false, fallback: true, error: failures.join(" | ") || "Resend rejected all recipients" };
+    }
+    if (failures.length) {
+      console.warn("[DiamondEdge] mail partial failures:", failures.join("; "));
     }
     return { delivered: true, fallback: false };
   } catch (e) {
@@ -67,9 +111,13 @@ export async function notifyOwnerNewSignup(
   newUserEmail: string,
   opts?: { awaitingEmailVerification?: boolean }
 ): Promise<void> {
+  const rawOwner = process.env.OWNER_NOTIFY_EMAIL ?? process.env.ADMIN_NOTIFY_EMAIL ?? "";
   const recipients = ownerRecipients();
   if (!recipients.length) {
-    console.warn("[DiamondEdge] owner signup notify skipped: OWNER_NOTIFY_EMAIL is empty");
+    console.warn(
+      `[DiamondEdge] owner signup notify skipped: OWNER_NOTIFY_EMAIL empty or invalid (raw_len=${rawOwner.length}). ` +
+        "Use a bare address like balkkc@gmail.com — no wrapping quotes."
+    );
     return;
   }
   const awaiting = opts?.awaitingEmailVerification ?? false;
@@ -87,7 +135,8 @@ export async function notifyOwnerNewSignup(
         <p>${detail}</p>
       </div>
     `,
-      logFallback: `owner notify signup → ${recipients.join(", ")} (${newUserEmail})`
+      logFallback: `owner notify signup → ${recipients.join(", ")} (${newUserEmail})`,
+      tags: [{ name: "purpose", value: "owner_signup" }]
     });
     if (!r.delivered) {
       console.error("[DiamondEdge] owner signup notify failed:", r.error ?? "unknown");
@@ -105,9 +154,12 @@ export async function notifyOwnerNewCommunityPost(input: {
   hasImage: boolean;
   baseUrl: string;
 }): Promise<void> {
+  const rawOwner = process.env.OWNER_NOTIFY_EMAIL ?? process.env.ADMIN_NOTIFY_EMAIL ?? "";
   const recipients = ownerRecipients();
   if (!recipients.length) {
-    console.warn("[DiamondEdge] owner community notify skipped: OWNER_NOTIFY_EMAIL is empty");
+    console.warn(
+      `[DiamondEdge] owner community notify skipped: OWNER_NOTIFY_EMAIL empty or invalid (raw_len=${rawOwner.length}).`
+    );
     return;
   }
   const cap = input.caption ? escapeHtml(input.caption) : "";
@@ -125,7 +177,8 @@ export async function notifyOwnerNewCommunityPost(input: {
         <p><a href="${input.baseUrl.replace(/\/$/, "")}/community">Open community</a></p>
       </div>
     `,
-      logFallback: `owner notify community post → ${recipients.join(", ")} (${input.postId})`
+      logFallback: `owner notify community post → ${recipients.join(", ")} (${input.postId})`,
+      tags: [{ name: "purpose", value: "owner_community" }]
     });
     if (!r.delivered) {
       console.error("[DiamondEdge] owner community notify failed:", r.error ?? "unknown");
@@ -136,21 +189,15 @@ export async function notifyOwnerNewCommunityPost(input: {
 }
 
 export async function sendVerificationEmail(email: string, verifyUrl: string): Promise<SendMailResult> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM_EMAIL || "DiamondEdge <onboarding@resend.dev>";
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const from = process.env.RESEND_FROM_EMAIL?.trim() || "DiamondEdge <onboarding@resend.dev>";
 
   if (!apiKey) {
     console.log(`[DiamondEdge] Verify (no RESEND_API_KEY) ${email}: ${verifyUrl}`);
     return { delivered: false, fallback: true };
   }
 
-  try {
-    const resend = new Resend(apiKey);
-    const { error } = await resend.emails.send({
-      from,
-      to: email,
-      subject: "Verify your DiamondEdge account",
-      html: `
+  const verifyHtml = `
       <div style="font-family: Arial, sans-serif; line-height: 1.6;">
         <h2>Welcome to DiamondEdge Simulator</h2>
         <p>Click below to verify your email and activate your account:</p>
@@ -158,11 +205,23 @@ export async function sendVerificationEmail(email: string, verifyUrl: string): P
         <p>If the button does not work, copy and paste this link into your browser:</p>
         <p style="word-break:break-all;">${verifyUrl}</p>
       </div>
-    `
+    `;
+
+  try {
+    const resend = new Resend(apiKey);
+    const result = await resend.emails.send({
+      from,
+      to: email.trim(),
+      subject: "Verify your DiamondEdge account",
+      html: verifyHtml,
+      text: stripTagsForPlain(verifyHtml)
     });
-    if (error) {
-      console.error("[DiamondEdge] Resend error:", error);
-      return { delivered: false, fallback: true, error: error.message ?? "Resend rejected the send" };
+    if (result.error) {
+      console.error("[DiamondEdge] Resend error:", summarizeResendErr(result.error));
+      return { delivered: false, fallback: true, error: result.error.message ?? "Resend rejected the send" };
+    }
+    if (result.data?.id) {
+      console.info(`[DiamondEdge] verify mail queued ok resend_id=${result.data.id} to=${email}`);
     }
     return { delivered: true, fallback: false };
   } catch (e) {

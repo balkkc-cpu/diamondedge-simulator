@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runSimulation1000 } from "@/lib/simEngine";
+import { buildGameHistoryContext } from "@/lib/simContext";
 import { SlipBet } from "@/lib/types";
 import { rateLimit } from "@/lib/rateLimit";
 
@@ -23,10 +24,12 @@ export async function POST(req: NextRequest) {
   }
   if (!bets.length) return NextResponse.json({ error: "No bets selected" }, { status: 400 });
 
-  const simulation = runSimulation1000(bets, { iterations: 1000 });
+  const gameContextById = await buildGameHistoryContext(bets);
+  const simulation = runSimulation1000(bets, { iterations: 1200, gameContextById });
 
   return NextResponse.json({
     ...simulation,
+    bets,
     bankroll,
     unitSize,
     disclaimer: "Simulation estimates only. No outcome is guaranteed."
