@@ -62,6 +62,14 @@ export function PlayerPropColumns({
   markets: Market[];
   onAdd: (bet: SlipBet) => void;
 }) {
+  if (!markets.length) {
+    return (
+      <p className="text-sm text-slate-500">
+        No sportsbook player props available for this game right now.
+      </p>
+    );
+  }
+
   const byStat = new Map<string, Market[]>();
   for (const m of markets) {
     const sk = statKeyOf(m);

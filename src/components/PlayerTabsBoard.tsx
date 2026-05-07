@@ -49,7 +49,11 @@ export function PlayerTabsBoard({
   const [tab, setTab] = useState(0);
 
   if (!groups.length) {
-    return <p className="text-sm text-slate-500">No player props for this game.</p>;
+    return (
+      <p className="text-sm text-slate-500">
+        No sportsbook player props available for this game right now.
+      </p>
+    );
   }
 
   const safeIdx = Math.min(tab, groups.length - 1);
