@@ -30,6 +30,27 @@ export type LiveGamePayload = {
   inHole?: string;
   /** Most recent completed or in-progress play description */
   lastPlayText?: string;
+  firstRunnerName?: string;
+  secondRunnerName?: string;
+  thirdRunnerName?: string;
+  lastPitch?: {
+    pitchType?: string;
+    startSpeedMph?: number;
+    endSpeedMph?: number;
+    zone?: number;
+    px?: number;
+    pz?: number;
+    description?: string;
+  };
+  hitTracker?: {
+    launchSpeedMph?: number;
+    launchAngleDeg?: number;
+    distanceFt?: number;
+    trajectory?: string;
+    hardness?: string;
+    reachedBase?: "1B" | "2B" | "3B" | "HR" | null;
+    onBase: boolean;
+  };
 };
 
 function simpleWinProb(away: number, home: number, inning: number, half: string, outs: number): { away: number; home: number } {
@@ -80,6 +101,11 @@ function pickLastPlayDescription(feedJson: Record<string, unknown> | null, curre
 function asRecord(v: unknown): Record<string, unknown> | undefined {
   if (v !== null && typeof v === "object") return v as Record<string, unknown>;
   return undefined;
+}
+
+function asNum(v: unknown): number | undefined {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 function parseHalf(raw: string): LiveGamePayload["inningHalf"] {
@@ -198,6 +224,53 @@ export async function fetchLiveGameState(gamePk: string): Promise<LiveGamePayloa
     const inHole = hole?.fullName as string | undefined;
     const lastPlayText = pickLastPlayDescription(feedJson, play);
 
+    const postOnFirst = asRecord(matchup?.postOnFirst);
+    const postOnSecond = asRecord(matchup?.postOnSecond);
+    const postOnThird = asRecord(matchup?.postOnThird);
+    const offFirst = asRecord((lsOff ?? {}).first);
+    const offSecond = asRecord((lsOff ?? {}).second);
+    const offThird = asRecord((lsOff ?? {}).third);
+    const firstRunnerName =
+      (postOnFirst?.fullName as string | undefined) ?? (offFirst?.fullName as string | undefined);
+    const secondRunnerName =
+      (postOnSecond?.fullName as string | undefined) ?? (offSecond?.fullName as string | undefined);
+    const thirdRunnerName =
+      (postOnThird?.fullName as string | undefined) ?? (offThird?.fullName as string | undefined);
+
+    const playEvents = Array.isArray(play?.playEvents) ? (play?.playEvents as unknown[]) : [];
+    let lastPitchRec: Record<string, unknown> | undefined;
+    let lastPitchDetails: Record<string, unknown> | undefined;
+    let lastPitchData: Record<string, unknown> | undefined;
+    let lastPitchCoords: Record<string, unknown> | undefined;
+    let hitData: Record<string, unknown> | undefined;
+    for (let i = playEvents.length - 1; i >= 0; i--) {
+      const pe = asRecord(playEvents[i]);
+      if (!pe) continue;
+      if (!hitData) {
+        const hd = asRecord(pe.hitData);
+        if (hd) hitData = hd;
+      }
+      if (pe.isPitch === true && !lastPitchRec) {
+        lastPitchRec = pe;
+        lastPitchDetails = asRecord(pe.details);
+        lastPitchData = asRecord(pe.pitchData);
+        lastPitchCoords = asRecord(lastPitchData?.coordinates);
+      }
+    }
+
+    const batterId = asNum((bat as Record<string, unknown> | undefined)?.id);
+    const on1Id = asNum(postOnFirst?.id);
+    const on2Id = asNum(postOnSecond?.id);
+    const on3Id = asNum(postOnThird?.id);
+    let reachedBase: "1B" | "2B" | "3B" | "HR" | null = null;
+    if (batterId != null) {
+      if (on1Id === batterId) reachedBase = "1B";
+      else if (on2Id === batterId) reachedBase = "2B";
+      else if (on3Id === batterId) reachedBase = "3B";
+    }
+    const evType = String((asRecord(play?.result)?.eventType as string | undefined) ?? "").toLowerCase();
+    if (evType === "home_run" || evType === "home run") reachedBase = "HR";
+
     return {
       gamePk,
       awayTeam,
@@ -225,7 +298,32 @@ export async function fetchLiveGameState(gamePk: string): Promise<LiveGamePayloa
       atBatBatter,
       onDeck,
       inHole,
-      lastPlayText
+      lastPlayText,
+      firstRunnerName,
+      secondRunnerName,
+      thirdRunnerName,
+      lastPitch: lastPitchRec
+        ? {
+            pitchType: (lastPitchDetails?.type as Record<string, unknown> | undefined)?.description as string | undefined,
+            startSpeedMph: asNum(lastPitchData?.startSpeed),
+            endSpeedMph: asNum(lastPitchData?.endSpeed),
+            zone: asNum(lastPitchData?.zone),
+            px: asNum(lastPitchCoords?.pX),
+            pz: asNum(lastPitchCoords?.pZ),
+            description: lastPitchDetails?.description as string | undefined
+          }
+        : undefined,
+      hitTracker: hitData
+        ? {
+            launchSpeedMph: asNum(hitData.launchSpeed),
+            launchAngleDeg: asNum(hitData.launchAngle),
+            distanceFt: asNum(hitData.totalDistance),
+            trajectory: hitData.trajectory as string | undefined,
+            hardness: hitData.hardness as string | undefined,
+            reachedBase,
+            onBase: reachedBase === "1B" || reachedBase === "2B" || reachedBase === "3B"
+          }
+        : undefined
     };
   } catch {
     return null;

@@ -3,7 +3,21 @@
 import { LiveGamePayload } from "@/lib/liveGame";
 import { useEffect, useState } from "react";
 
-function BasesDiamond({ first, second, third }: { first: boolean; second: boolean; third: boolean }) {
+function BasesDiamond({
+  first,
+  second,
+  third,
+  firstName,
+  secondName,
+  thirdName
+}: {
+  first: boolean;
+  second: boolean;
+  third: boolean;
+  firstName?: string;
+  secondName?: string;
+  thirdName?: string;
+}) {
   return (
     <div className="relative mx-auto h-36 w-36">
       <div className="absolute inset-0 rotate-45 rounded-lg border-2 border-slate-600/80 bg-slate-900/60" />
@@ -14,6 +28,11 @@ function BasesDiamond({ first, second, third }: { first: boolean; second: boolea
         }
         title="2nd"
       />
+      {second && secondName ? (
+        <div className="absolute left-1/2 top-0 -translate-x-1/2 rounded bg-slate-900/90 px-1 py-0.5 text-[9px] text-slate-200">
+          {secondName}
+        </div>
+      ) : null}
       <div
         className={
           "absolute bottom-8 left-3 h-7 w-7 rounded border-2 " +
@@ -21,6 +40,11 @@ function BasesDiamond({ first, second, third }: { first: boolean; second: boolea
         }
         title="3rd"
       />
+      {third && thirdName ? (
+        <div className="absolute bottom-4 left-0 max-w-[52px] truncate rounded bg-slate-900/90 px-1 py-0.5 text-[9px] text-slate-200">
+          {thirdName}
+        </div>
+      ) : null}
       <div
         className={
           "absolute bottom-8 right-3 h-7 w-7 rounded border-2 " +
@@ -28,7 +52,49 @@ function BasesDiamond({ first, second, third }: { first: boolean; second: boolea
         }
         title="1st"
       />
+      {first && firstName ? (
+        <div className="absolute bottom-4 right-0 max-w-[52px] truncate rounded bg-slate-900/90 px-1 py-0.5 text-[9px] text-slate-200">
+          {firstName}
+        </div>
+      ) : null}
       <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[10px] text-slate-500">Bases</div>
+    </div>
+  );
+}
+
+function StrikeZone({
+  px,
+  pz
+}: {
+  px?: number;
+  pz?: number;
+}) {
+  const has = typeof px === "number" && typeof pz === "number";
+  const zoneLeft = 1;
+  const zoneRight = -1;
+  const zoneBottom = 1.5;
+  const zoneTop = 3.5;
+  const xPct = has ? ((zoneLeft - px!) / (zoneLeft - zoneRight)) * 100 : 50;
+  const yPct = has ? ((zoneTop - pz!) / (zoneTop - zoneBottom)) * 100 : 50;
+  const inZone = has && px! <= zoneLeft && px! >= zoneRight && pz! >= zoneBottom && pz! <= zoneTop;
+  return (
+    <div className="rounded-lg border border-slate-700/70 bg-slate-900/70 p-2">
+      <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-400">Last pitch location</div>
+      <div className="relative h-40 w-36 border-2 border-slate-500/80 bg-slate-950/80">
+        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3">
+          {Array.from({ length: 9 }).map((_, i) => (
+            <div key={i} className="border border-slate-700/50" />
+          ))}
+        </div>
+        {has ? (
+          <div
+            className={"absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full " + (inZone ? "bg-emerald-400" : "bg-rose-400")}
+            style={{ left: `${xPct}%`, top: `${yPct}%` }}
+            title={`px ${px?.toFixed(2)}, pz ${pz?.toFixed(2)}`}
+          />
+        ) : null}
+      </div>
+      <div className="mt-1 text-[10px] text-slate-400">{has ? `px ${px!.toFixed(2)}, pz ${pz!.toFixed(2)}` : "No pitch coordinate yet"}</div>
     </div>
   );
 }
@@ -120,6 +186,22 @@ export function LiveTrackerBoard({ gamePk, gameLabel }: { gamePk: string; gameLa
             <span className="text-[10px] font-semibold uppercase text-slate-500">Last play · </span>
             {live.lastPlayText ?? "No play description yet (pregame or feed loading)."}
           </div>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            <div className="rounded-lg border border-slate-700/80 bg-slate-900/70 px-3 py-2 text-xs text-slate-300">
+              <span className="text-[10px] font-semibold uppercase text-slate-500">Last pitch · </span>
+              {live.lastPitch?.pitchType ?? "Unknown"}{" "}
+              {typeof live.lastPitch?.startSpeedMph === "number" ? `@ ${live.lastPitch.startSpeedMph.toFixed(1)} mph` : ""}
+              {typeof live.lastPitch?.zone === "number" ? ` · zone ${live.lastPitch.zone}` : ""}
+            </div>
+            <div className="rounded-lg border border-slate-700/80 bg-slate-900/70 px-3 py-2 text-xs text-slate-300">
+              <span className="text-[10px] font-semibold uppercase text-slate-500">Hit tracker · </span>
+              {typeof live.hitTracker?.launchSpeedMph === "number"
+                ? `${live.hitTracker.launchSpeedMph.toFixed(1)} mph EV`
+                : "No ball-in-play yet"}
+              {typeof live.hitTracker?.distanceFt === "number" ? ` · ${Math.round(live.hitTracker.distanceFt)} ft` : ""}
+              {live.hitTracker?.reachedBase ? ` · ${live.hitTracker.reachedBase}` : ""}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -160,7 +242,17 @@ export function LiveTrackerBoard({ gamePk, gameLabel }: { gamePk: string; gameLa
       </div>
 
       <div className="grid gap-4 border-t border-slate-700/50 px-4 py-6 md:grid-cols-2">
-        <BasesDiamond first={live.firstOccupied} second={live.secondOccupied} third={live.thirdOccupied} />
+        <div className="space-y-3">
+          <BasesDiamond
+            first={live.firstOccupied}
+            second={live.secondOccupied}
+            third={live.thirdOccupied}
+            firstName={live.firstRunnerName}
+            secondName={live.secondRunnerName}
+            thirdName={live.thirdRunnerName}
+          />
+          <StrikeZone px={live.lastPitch?.px} pz={live.lastPitch?.pz} />
+        </div>
         <div>
           <h4 className="mb-2 text-sm font-semibold text-slate-300">Linescore (R per inning)</h4>
           <div className="overflow-x-auto text-xs">

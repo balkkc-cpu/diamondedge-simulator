@@ -50,7 +50,12 @@ const MLB_NICKNAMES_DESC = [
 
 /** Map Odds API / common abbreviations to the same key as full MLB.com names. */
 export function teamKey(s: string): string {
-  const n = normTeam(s).replace(/'/g, "'");
+  const n = normTeam(s)
+    .replace(/d[\s-]?backs/g, "diamondbacks")
+    .replace(/\ba's\b/g, "athletics")
+    .replace(/\bchi white sox\b/g, "white sox")
+    .replace(/\bchi cubs\b/g, "cubs")
+    .replace(/'/g, "'");
   if (/athletic|^a s$|^as$/.test(n)) return "athletics";
   for (const nick of MLB_NICKNAMES_DESC) {
     if (n === nick || n.endsWith(" " + nick)) return nick;
