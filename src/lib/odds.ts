@@ -33,3 +33,8 @@ export function fractionalKellyUnits(hitProb: number, americanOdds: number, bank
   const k = kellyFraction(hitProb, americanOdds) * fraction;
   return Math.min(1.5, Math.round(k * bankrollUnits * 4) / 4);
 }
+
+/** True when odds were merged from The Odds API (FanDuel / DraftKings / etc.), not the local seed model. */
+export function isSportsbookLineSource(source: string): boolean {
+  return source === "fanduel" || source === "draftkings" || source === "betmgm";
+}

@@ -114,7 +114,8 @@ export default function BetBuilderPage() {
             <h2 className="text-xl font-bold tracking-tight text-sky-300">Bet board</h2>
             <p className="mt-1 max-w-2xl text-sm text-slate-400">
               Player board defaults to per-player tabs; switch to stat columns if you prefer. Board prices merge FanDuel
-              (The Odds API) when <code className="text-slate-300">ODDS_API_KEY</code> is set — client refetch every 10
+              (then DraftKings if FD is missing) via The Odds API when{" "}
+              <code className="text-slate-300">ODDS_API_KEY</code> is set — client refetch every 10
               minutes. Simulation only — not a sportsbook.
             </p>
           </div>

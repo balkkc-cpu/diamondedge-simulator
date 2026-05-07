@@ -27,15 +27,31 @@ export default function SignupPage() {
       setErr("Network error — is the dev server running?");
       return;
     }
+    const rawBody = await res.text();
     let data: Record<string, unknown> = {};
     try {
-      data = (await res.json()) as Record<string, unknown>;
+      data = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
     } catch {
-      setErr("Bad response from server");
+      const preview = rawBody.replace(/\s+/g, " ").slice(0, 200);
+      const hint =
+        res.status >= 500
+          ? " Often this is a server crash or HTML error page — check Vercel logs and DATABASE_URL."
+          : "";
+      setErr(
+        `Server returned status ${res.status} with non-JSON body.${hint}` +
+          (preview ? ` First bytes: ${preview}` : "")
+      );
       return;
     }
     if (!res.ok) {
-      setErr(String(data.error ?? "Signup failed"));
+      let line = String(data.error ?? "Signup failed");
+      if (typeof data.prismaCode === "string" && data.prismaCode) {
+        line += ` (${data.prismaCode})`;
+      }
+      if (typeof data.debugMessage === "string" && data.debugMessage) {
+        line += ` — ${data.debugMessage}`;
+      }
+      setErr(line);
       return;
     }
     if (data.loggedIn) {

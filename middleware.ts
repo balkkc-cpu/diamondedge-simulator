@@ -16,6 +16,11 @@ function securityHeaders(res: NextResponse) {
 export function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
 
+  // APIs: skip page-oriented security headers (avoids odd edge cases; routes still use HTTPS on Vercel).
+  if (path.startsWith("/api/")) {
+    return NextResponse.next();
+  }
+
   if (path.startsWith("/admin")) {
     const token = req.cookies.get(ADMIN_COOKIE_NAME)?.value;
     const session = verifySessionToken(token);

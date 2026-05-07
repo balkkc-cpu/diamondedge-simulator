@@ -1,5 +1,6 @@
 "use client";
 
+import { isSportsbookLineSource } from "@/lib/odds";
 import { Market } from "@/lib/types";
 import { SlipBet } from "@/lib/types";
 
@@ -164,7 +165,7 @@ export function GameLinesRow({
           >
             <span className="block text-slate-400">
               {m.marketType}
-              {m.source === "fanduel" ? (
+              {isSportsbookLineSource(m.source) ? (
                 <span className="ml-1 rounded bg-emerald-900/40 px-1 text-[9px] font-bold uppercase text-emerald-300">board</span>
               ) : null}
             </span>

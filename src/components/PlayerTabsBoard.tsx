@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { isSportsbookLineSource } from "@/lib/odds";
 import type { Market, SlipBet } from "@/lib/types";
 
 function playerNameOf(m: Market): string {
@@ -89,7 +90,7 @@ export function PlayerTabsBoard({
                 onClick={() => onAdd(marketToSlip(m))}
               >
                 <span className="font-semibold text-sky-200/90">{m.american > 0 ? `+${m.american}` : m.american}</span>
-                {m.source === "fanduel" ? (
+                {isSportsbookLineSource(m.source) ? (
                   <span className="ml-1.5 rounded bg-emerald-900/50 px-1 text-[9px] font-bold uppercase text-emerald-300">
                     live
                   </span>

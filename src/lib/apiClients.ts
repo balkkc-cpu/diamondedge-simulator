@@ -29,18 +29,67 @@ function generateMarketsForGame(game: GameCard): Market[] {
   const baseHomeMl = -115 + homeEdge * 4;
   const baseAwayMl = 105 - homeEdge * 4;
   const total = 8 + ((seed % 4) * 0.5);
-  const homeSlug = game.homeTeam.split(" ").pop() ?? game.homeTeam;
-  const awaySlug = game.awayTeam.split(" ").pop() ?? game.awayTeam;
+  const ttLine = Math.round((total / 2 + 0.5) * 2) / 2;
 
   return [
     { id: `${game.id}-ml-home`, gameId: game.id, marketType: "moneyline", selection: game.homeTeam, line: null, american: baseHomeMl, source: "model" },
     { id: `${game.id}-ml-away`, gameId: game.id, marketType: "moneyline", selection: game.awayTeam, line: null, american: baseAwayMl, source: "model" },
-    { id: `${game.id}-rl-home`, gameId: game.id, marketType: "runline", selection: `${homeSlug} -1.5`, line: -1.5, american: 138 + (seed % 20), source: "model" },
-    { id: `${game.id}-rl-away`, gameId: game.id, marketType: "runline", selection: `${awaySlug} +1.5`, line: 1.5, american: -155 + (seed % 12), source: "model" },
+    {
+      id: `${game.id}-rl-home`,
+      gameId: game.id,
+      marketType: "runline",
+      selection: `${game.homeTeam} -1.5`,
+      line: -1.5,
+      american: 138 + (seed % 20),
+      source: "model"
+    },
+    {
+      id: `${game.id}-rl-away`,
+      gameId: game.id,
+      marketType: "runline",
+      selection: `${game.awayTeam} +1.5`,
+      line: 1.5,
+      american: -155 + (seed % 12),
+      source: "model"
+    },
     { id: `${game.id}-tot-over`, gameId: game.id, marketType: "total", selection: `Over ${total.toFixed(1)}`, line: total, american: -108, source: "model" },
     { id: `${game.id}-tot-under`, gameId: game.id, marketType: "total", selection: `Under ${total.toFixed(1)}`, line: total, american: -112, source: "model" },
-    { id: `${game.id}-tt-home`, gameId: game.id, marketType: "team_total", selection: `${homeSlug} Over ${(total / 2 + 0.5).toFixed(1)}`, line: total / 2 + 0.5, american: -110, source: "model" },
-    { id: `${game.id}-f5`, gameId: game.id, marketType: "first5", selection: `${game.homeTeam} First 5 ML`, line: null, american: -102, source: "model" },
+    {
+      id: `${game.id}-tt-home`,
+      gameId: game.id,
+      marketType: "team_total",
+      selection: `${game.homeTeam} Over ${ttLine.toFixed(1)}`,
+      line: ttLine,
+      american: -110,
+      source: "model"
+    },
+    {
+      id: `${game.id}-tt-away`,
+      gameId: game.id,
+      marketType: "team_total",
+      selection: `${game.awayTeam} Over ${ttLine.toFixed(1)}`,
+      line: ttLine,
+      american: -110,
+      source: "model"
+    },
+    {
+      id: `${game.id}-f5-h`,
+      gameId: game.id,
+      marketType: "first5",
+      selection: `${game.homeTeam} · First 5 innings`,
+      line: null,
+      american: -102,
+      source: "model"
+    },
+    {
+      id: `${game.id}-f5-a`,
+      gameId: game.id,
+      marketType: "first5",
+      selection: `${game.awayTeam} · First 5 innings`,
+      line: null,
+      american: -102,
+      source: "model"
+    },
     { id: `${game.id}-yrfi`, gameId: game.id, marketType: "yrfi", selection: "YRFI (Yes Run 1st Inning)", line: null, american: -107, source: "model" },
     { id: `${game.id}-nrfi`, gameId: game.id, marketType: "nrfi", selection: "NRFI (No Run 1st Inning)", line: null, american: -113, source: "model" }
   ];

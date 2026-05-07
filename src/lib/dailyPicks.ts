@@ -1,4 +1,5 @@
 import { getAllMarkets, getDailySchedule } from "./apiClients";
+import { isSportsbookLineSource } from "./odds";
 import { runSimulation1000 } from "./simEngine";
 import type { Market, SlipBet } from "./types";
 
@@ -29,7 +30,7 @@ function candidateStraightBets(markets: Market[], maxPerGame = 3): SlipBet[] {
   const out: SlipBet[] = [];
   for (const [, arr] of byGame) {
     const fdFirst = (a: Market[]) => {
-      const fd = a.filter((x) => x.source === "fanduel");
+      const fd = a.filter((x) => isSportsbookLineSource(x.source));
       return fd.length ? fd : a;
     };
 
