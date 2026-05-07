@@ -200,12 +200,15 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
     console.warn("[odds-api] ODDS_API_KEY missing; using model prices.");
     return [];
   }
-  const base =
+  const baseWithBooks =
     "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds" +
     `?apiKey=${encodeURIComponent(key)}&regions=us&oddsFormat=american&bookmakers=fanduel,draftkings`;
+  const baseAnyBook =
+    "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds" +
+    `?apiKey=${encodeURIComponent(key)}&regions=us&oddsFormat=american`;
   const allMarkets = `${CORE_MARKETS},${PLAYER_MARKETS}`;
   try {
-    const res = await fetch(`${base}&markets=${allMarkets}`, { next: { revalidate: REVALIDATE_SEC } });
+    const res = await fetch(`${baseWithBooks}&markets=${allMarkets}`, { next: { revalidate: REVALIDATE_SEC } });
     if (res.ok) {
       const out = (await res.json()) as unknown[];
       setOddsDebug({
@@ -226,8 +229,8 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
   }
   try {
     const [a, b] = await Promise.all([
-      fetch(`${base}&markets=${CORE_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } }),
-      fetch(`${base}&markets=${PLAYER_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } })
+      fetch(`${baseWithBooks}&markets=${CORE_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } }),
+      fetch(`${baseWithBooks}&markets=${PLAYER_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } })
     ]);
     if (!a.ok) await logOddsApiError(a, "core");
     if (!b.ok) await logOddsApiError(b, "player");
@@ -235,6 +238,26 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
     const jb = b.ok ? ((await b.json()) as unknown[]) : [];
     const merged = mergeEventsById([ja, jb]);
     if (!merged.length) {
+      // Some plans/regions return empty when a strict bookmaker filter is applied.
+      // Retry without the filter and use whichever books are available.
+      const [c, d] = await Promise.all([
+        fetch(`${baseAnyBook}&markets=${CORE_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } }),
+        fetch(`${baseAnyBook}&markets=${PLAYER_MARKETS}`, { next: { revalidate: REVALIDATE_SEC } })
+      ]);
+      if (!c.ok) await logOddsApiError(c, "core-any-book");
+      if (!d.ok) await logOddsApiError(d, "player-any-book");
+      const jc = c.ok ? ((await c.json()) as unknown[]) : [];
+      const jd = d.ok ? ((await d.json()) as unknown[]) : [];
+      const mergedAny = mergeEventsById([jc, jd]);
+      if (mergedAny.length) {
+        setOddsDebug({
+          status: "ok",
+          detail: `fallback any-book request ok (${mergedAny.length} merged events)`,
+          remaining: c.headers.get("x-requests-remaining") ?? d.headers.get("x-requests-remaining") ?? undefined,
+          used: c.headers.get("x-requests-used") ?? d.headers.get("x-requests-used") ?? undefined
+        });
+        return mergedAny;
+      }
       setOddsDebug({
         status: "no_events",
         detail: "split requests returned 0 merged events",
