@@ -370,9 +370,11 @@ export async function getDailySchedule(): Promise<GameCard[]> {
         /delay|susp|ppd|postponed|cancel/i.test(detailed) || String(g.status?.reason ?? "").length > 2
           ? [detailed, g.status?.reason].filter(Boolean).join(" · ")
           : null;
+      // MLB Stats `gameDate` is ISO 8601 UTC; keep as-is for Date parsing; UI formats in America/New_York.
+      const rawDate = g.gameDate ?? g.gameInfo?.firstPitch ?? g.gameDateTime ?? "";
       return {
         id: String(g.gamePk),
-        startTime: g.gameDate,
+        startTime: typeof rawDate === "string" && rawDate ? rawDate : new Date().toISOString(),
         status: g.status?.abstractGameState ?? "scheduled",
         homeTeam: g.teams?.home?.team?.name ?? "Home Team",
         awayTeam: g.teams?.away?.team?.name ?? "Away Team",

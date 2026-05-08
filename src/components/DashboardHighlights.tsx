@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatDateTimeEastern } from "@/lib/timeDisplay";
 
 type HighlightClip = {
   id: string;
@@ -67,7 +68,7 @@ export function DashboardHighlights() {
             />
             <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
               <span>
-                {new Date(c.gameTime).toLocaleString()} · {c.status}
+                {formatDateTimeEastern(c.gameTime)} · {c.status}
               </span>
               {c.sourceUrl ? (
                 <a href={c.sourceUrl} target="_blank" rel="noreferrer" className="text-sky-400 underline">

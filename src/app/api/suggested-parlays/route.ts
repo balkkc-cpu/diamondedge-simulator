@@ -3,6 +3,8 @@ import { rateLimit } from "@/lib/rateLimit";
 import { getAllMarkets, getDailySchedule } from "@/lib/apiClients";
 import { buildSuggestedParlaysFromBoard } from "@/lib/suggestedParlays";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: Request) {
   const ip = req.headers.get("x-forwarded-for") ?? "local";
   const rl = rateLimit(`suggested-parlays:${ip}`, 60, 60_000);

@@ -27,7 +27,10 @@ export function DashboardSuggestedParlays(props: { parlays: SuggestedParlayCard[
     setLegs(nextLegs);
     setLoading(true);
     try {
-      const res = await fetch(`/api/suggested-parlays?legs=${nextLegs}`, { method: "GET" });
+      const res = await fetch(`/api/suggested-parlays?legs=${nextLegs}&_=${Date.now()}`, {
+        method: "GET",
+        cache: "no-store"
+      });
       const data = await res.json();
       setParlays((data?.parlays ?? []) as SuggestedParlayCard[]);
     } catch {
@@ -66,6 +69,9 @@ export function DashboardSuggestedParlays(props: { parlays: SuggestedParlayCard[
             onClick={() => refresh(4)}
           >
             4
+          </button>
+          <button type="button" className="btn-muted" onClick={() => refresh(legs)} disabled={loading} title="Draw a new random mix">
+            New mix
           </button>
         </div>
       </div>

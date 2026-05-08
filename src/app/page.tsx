@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getDailyPicksPayload } from "@/lib/dailyPicks";
 import { getAllMarkets, getDailySchedule, getInjuries, getWeatherFallback } from "@/lib/apiClients";
+import { formatDateTimeEastern } from "@/lib/timeDisplay";
 import { DashboardSuggestedPicks } from "@/components/DashboardSuggestedPicks";
 import { DonationCard } from "@/components/DonationCard";
 import { GameCard } from "@/lib/types";
@@ -42,7 +43,7 @@ export default async function DashboardPage() {
                   {g.awayTeam} @ {g.homeTeam}
                 </div>
                 <div className="text-xs text-slate-400">
-                  {new Date(g.startTime).toLocaleString()} · {g.status} · {g.weather}
+                  {formatDateTimeEastern(g.startTime)} · {g.status} · {g.weather}
                 </div>
                 {g.delayInfo ? (
                   <div className="mt-1 text-xs font-medium text-amber-300/90">Status: {g.delayInfo}</div>

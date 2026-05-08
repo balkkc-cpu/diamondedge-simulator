@@ -1,5 +1,5 @@
 import { filterLegiblePlayerPropsForSlate, isPlayerPropMarketType, isSportsbookLineSource } from "@/lib/odds";
-import { createSeededRng, hashSeed, shuffleInPlace } from "@/lib/parlaySampling";
+import { createSeededRng, hashSeed, rotateTake, shuffleInPlace } from "@/lib/parlaySampling";
 import { runSimulation1000 } from "@/lib/simEngine";
 import { explainLeg } from "@/lib/simExplain";
 import type { GameCard, Market, SlipBet } from "@/lib/types";
@@ -114,6 +114,53 @@ function pickLegsDiverse(
   return out.slice(0, targetLegs);
 }
 
+function slipSignatureLegs(legs: SuggestedParlayLeg[]): string {
+  return legs.map((l) => l.betId).sort().join("|");
+}
+
+/**
+ * Draws many diverse candidate parlays, scores with jitter, then picks from the top band — more variety each refresh.
+ */
+function pickStochasticLegSet(
+  candidates: SuggestedParlayLeg[],
+  targetLegs: number,
+  minHit: number,
+  diversitySeed: number,
+  kind: string
+): SuggestedParlayLeg[] {
+  if (!candidates.length) return [];
+  const attempts = 18;
+  const bundles: SuggestedParlayLeg[][] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < attempts; i++) {
+    const rng = createSeededRng(hashSeed([kind, String(diversitySeed), String(i), "parlay-try"]));
+    const legs = pickLegsDiverse(candidates, targetLegs, minHit, rng);
+    if (legs.length < Math.min(2, targetLegs)) continue;
+    const sig = slipSignatureLegs(legs);
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    bundles.push(legs);
+  }
+  if (!bundles.length) {
+    return pickLegsDiverse(
+      candidates,
+      targetLegs,
+      minHit,
+      createSeededRng(hashSeed([kind, "fallback", String(diversitySeed)]))
+    );
+  }
+  const scored = bundles.map((legs) => {
+    const p = legs.reduce((a, x) => a * x.hitProbability, 1);
+    const jitterRng = createSeededRng(hashSeed([kind, slipSignatureLegs(legs), String(diversitySeed), "jit"]));
+    return { legs, w: p * (0.86 + jitterRng() * 0.28) };
+  });
+  scored.sort((a, b) => b.w - a.w);
+  const topBand = scored.slice(0, Math.min(10, scored.length));
+  const pickRng = createSeededRng(hashSeed([kind, "choose", String(diversitySeed)]));
+  const idx = Math.floor(pickRng() * topBand.length);
+  return topBand[idx]!.legs;
+}
+
 export async function buildSuggestedParlaysFromBoard(input: {
   games: GameCard[];
   markets: Market[];
@@ -132,11 +179,11 @@ export async function buildSuggestedParlaysFromBoard(input: {
   );
   if (!board.length) return [];
 
-  // Keep it bounded for serverless: simulate top ~80 candidate legs.
-  const slip = board
-    .slice(0, 200)
-    .map(toSlipBet)
-    .filter((b) => Number.isFinite(b.oddsAmerican));
+  const shuffledBoard = shuffleInPlace([...board], createSeededRng(hashSeed(["board-shuf", String(diversitySeed)])));
+  const windowed = rotateTake(shuffledBoard, 200, diversitySeed);
+
+  // Bounded for serverless: 200 legs, order changes every refresh via shuffle + rotating window.
+  const slip = windowed.map(toSlipBet).filter((b) => Number.isFinite(b.oddsAmerican));
 
   const sim = runSimulation1000(slip, { iterations });
 
@@ -170,15 +217,13 @@ export async function buildSuggestedParlaysFromBoard(input: {
     rbis: enriched.filter((x) => classifyMarket({ id: x.betId, gameId: x.gameId, marketType: x.marketType, selection: x.selection, line: null, american: 0, source: "" }) === "rbis")
   };
 
-  const mixedScored = [...enriched]
-    .sort((a, b) => b.edge + b.hitProbability * 0.6 - (a.edge + a.hitProbability * 0.6))
-    .slice(0, 36);
-  const mixedLegs = pickLegsDiverse(
-    mixedScored,
-    parlayLegs,
-    0.25,
-    createSeededRng(hashSeed(["mixed", String(diversitySeed), String(parlayLegs)]))
+  const mixedScored = shuffleInPlace(
+    [...enriched]
+      .sort((a, b) => b.edge + b.hitProbability * 0.6 - (a.edge + a.hitProbability * 0.6))
+      .slice(0, 52),
+    createSeededRng(hashSeed(["mixed-shuf", String(diversitySeed)]))
   );
+  const mixedLegs = pickStochasticLegSet(mixedScored, parlayLegs, 0.25, diversitySeed, "mixed");
 
   const simContext = {
     iterations,
@@ -191,11 +236,15 @@ export async function buildSuggestedParlaysFromBoard(input: {
     {
       title: "Home Run parlay (high payout, lower hit rate)",
       kind: "hr" as const,
-      legs: pickLegsDiverse(
-        [...byKind.hr].sort((a, b) => b.hitProbability - a.hitProbability).slice(0, 36),
+      legs: pickStochasticLegSet(
+        shuffleInPlace(
+          [...byKind.hr].sort((a, b) => b.hitProbability - a.hitProbability).slice(0, 48),
+          createSeededRng(hashSeed(["hr-shuf", String(diversitySeed)]))
+        ),
         Math.min(2, parlayLegs),
         0.08,
-        createSeededRng(hashSeed(["hr", String(diversitySeed)]))
+        diversitySeed,
+        "hr"
       ),
       parlayHitProbability: 0,
       simContext
@@ -203,11 +252,17 @@ export async function buildSuggestedParlaysFromBoard(input: {
     {
       title: "Total bases parlay",
       kind: "bases" as const,
-      legs: pickLegsDiverse(
-        [...byKind.bases].sort((a, b) => b.edge + b.hitProbability * 0.55 - (a.edge + a.hitProbability * 0.55)).slice(0, 40),
+      legs: pickStochasticLegSet(
+        shuffleInPlace(
+          [...byKind.bases]
+            .sort((a, b) => b.edge + b.hitProbability * 0.55 - (a.edge + a.hitProbability * 0.55))
+            .slice(0, 52),
+          createSeededRng(hashSeed(["bases-shuf", String(diversitySeed)]))
+        ),
         parlayLegs,
         0.2,
-        createSeededRng(hashSeed(["bases", String(diversitySeed)]))
+        diversitySeed,
+        "bases"
       ),
       parlayHitProbability: 0,
       simContext
@@ -215,11 +270,17 @@ export async function buildSuggestedParlaysFromBoard(input: {
     {
       title: "Hits parlay",
       kind: "hits" as const,
-      legs: pickLegsDiverse(
-        [...byKind.hits].sort((a, b) => b.edge + b.hitProbability * 0.55 - (a.edge + a.hitProbability * 0.55)).slice(0, 40),
+      legs: pickStochasticLegSet(
+        shuffleInPlace(
+          [...byKind.hits]
+            .sort((a, b) => b.edge + b.hitProbability * 0.55 - (a.edge + a.hitProbability * 0.55))
+            .slice(0, 52),
+          createSeededRng(hashSeed(["hits-shuf", String(diversitySeed)]))
+        ),
         parlayLegs,
         0.2,
-        createSeededRng(hashSeed(["hits", String(diversitySeed)]))
+        diversitySeed,
+        "hits"
       ),
       parlayHitProbability: 0,
       simContext
@@ -227,11 +288,17 @@ export async function buildSuggestedParlaysFromBoard(input: {
     {
       title: "RBIs parlay",
       kind: "rbis" as const,
-      legs: pickLegsDiverse(
-        [...byKind.rbis].sort((a, b) => b.edge + b.hitProbability * 0.55 - (a.edge + a.hitProbability * 0.55)).slice(0, 40),
+      legs: pickStochasticLegSet(
+        shuffleInPlace(
+          [...byKind.rbis]
+            .sort((a, b) => b.edge + b.hitProbability * 0.55 - (a.edge + a.hitProbability * 0.55))
+            .slice(0, 52),
+          createSeededRng(hashSeed(["rbis-shuf", String(diversitySeed)]))
+        ),
         parlayLegs,
         0.2,
-        createSeededRng(hashSeed(["rbis", String(diversitySeed)]))
+        diversitySeed,
+        "rbis"
       ),
       parlayHitProbability: 0,
       simContext

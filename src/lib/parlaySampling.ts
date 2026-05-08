@@ -96,3 +96,11 @@ export function pickDiverseParlayMarkets(
 export function slipSignatureFromMarketIds(ids: string[]): string {
   return [...ids].sort().join("|");
 }
+
+/** Take a consecutive window into `arr`, rotated by `seed`, for varied slices without losing pool size. */
+export function rotateTake<T>(arr: T[], take: number, seed: number): T[] {
+  if (arr.length <= take) return [...arr];
+  const maxStart = arr.length - take;
+  const start = Math.abs(seed) % (maxStart + 1);
+  return arr.slice(start, start + take);
+}

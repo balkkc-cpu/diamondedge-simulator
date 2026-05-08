@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getDailySchedule, getGameDetail, getOddsMarkets } from "@/lib/apiClients";
+import { formatDateTimeEastern } from "@/lib/timeDisplay";
 import { isPlayerPropMarketType } from "@/lib/odds";
 import { GameCard, GameDetail, Market } from "@/lib/types";
 
@@ -20,7 +21,7 @@ export default async function GameDetailPage({ params }: { params: { id: string 
           {game.awayTeam} @ {game.homeTeam}
         </h2>
         <p className="text-sm text-slate-300">
-          {new Date(game.startTime).toLocaleString()} - {game.status} - {game.weather}
+          {formatDateTimeEastern(game.startTime)} · {game.status} · {game.weather}
         </p>
       </section>
       <section className="panel p-4">
