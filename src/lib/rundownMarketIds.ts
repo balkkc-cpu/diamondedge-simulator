@@ -80,7 +80,11 @@ export function inferStatKeyFromRundownDef(m: Pick<RundownMarketDef, "name" | "s
 
 export function inferPickKindFromRundownDef(m: Pick<RundownMarketDef, "name" | "short_description" | "description">): PickKind | undefined {
   const blob = normRundownText(m.name, m.short_description, m.description);
-  if (/\bdouble\s*double|\btriple\s*double\b|to\s*record|yes|no\b/.test(blob)) return "yes_no";
+  if (/\bdouble\s*double|\btriple\s*double\b/i.test(blob)) return "yes_no";
+  // "To record 2+ hits" ladders are tier props — do not treat as yes/no.
+  if (/\bto\s+record\b/i.test(blob) && /\d\s*\+/.test(blob)) return "tier_plus";
+  // HR yes/no only when the copy is clearly a home-run prop (avoid bare `yes` matching random substrings).
+  if (/\bto\s+hit\b.*\b(home\s*run|hr|homer)\b/i.test(blob)) return "yes_no";
   return "over_under";
 }
 

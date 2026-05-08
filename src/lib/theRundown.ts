@@ -1,4 +1,6 @@
 import { isPlayerPropMarketType } from "./odds";
+import { HITTER_MATRIX, PITCHER_MATRIX, type PickKind, type StatKey } from "./playerPropCatalog";
+import { playerPropSelectionLooksStatBased } from "./rosterProps";
 import type { GameCard, Market } from "./types";
 import {
   bookPropCodeFromRundownDef,
@@ -175,6 +177,121 @@ function resolveGameIdFromEvent(ev: any, games: GameCard[]): string {
   return match?.id ?? String(ev?.event_id ?? "");
 }
 
+function ouSideFromFeedExtras(p: any, ln: any): "over" | "under" | undefined {
+  const blob = [ln?.name, ln?.description, ln?.outcome_type, ln?.side, ln?.over_under, p?.outcome_type, p?.side, p?.over_under]
+    .map((x) => String(x ?? "").toLowerCase())
+    .join(" ");
+  if (/\bover\b|\bhigh\b|\bmore\b/.test(blob)) return "over";
+  if (/\bunder\b|\blow\b|\bless\b/.test(blob)) return "under";
+  return undefined;
+}
+
+/** When the participant label is only "Over"/"Under", the player often appears at the start of the market title. */
+function tryLeadingPlayerFromPropMarketName(mkName: string): string | undefined {
+  const s = mkName.replace(/\s+/g, " ").trim();
+  if (!s) return undefined;
+  const head = s.split(/\s*[-–—]\s*/)[0]!.split(/\s*\(/)[0]!.trim();
+  const words = head.split(/\s+/).filter(Boolean);
+  if (words.length >= 2 && words.length <= 6) {
+    const joined = words.join(" ");
+    if (!/^(batter|pitcher|player|team|game|total|alternate|strike|mlb)\b/i.test(joined)) return joined;
+  }
+  return undefined;
+}
+
+function statLabelFor(stat: StatKey): string {
+  if (stat === "k") return PITCHER_MATRIX.k.label;
+  return HITTER_MATRIX[stat as Exclude<StatKey, "k">].label;
+}
+
+/**
+ * Normalize free-feed player props so roster filtering, UI legibility, and the synthetic Odds layout
+ * all see stable rows (`Name · Over 0.5 Hits`, HR Yes/No, `N+ Hits`).
+ */
+function shapeRundownPlayerPropRow(row: Market, mkName: string, participantRaw: string, p: any, ln: any): Market {
+  if (row.marketType !== "player_prop" || !row.statKey) return row;
+  const stat = row.statKey;
+  const mt = `player_${stat}`;
+  let pickKind: PickKind = (row.pickKind ?? "over_under") as PickKind;
+  const kindBlob = `${mkName} ${participantRaw}`.toLowerCase();
+  if (/\d\s*\+/.test(kindBlob) && pickKind !== "yes_no") pickKind = "tier_plus";
+
+  const { playerName: parsedPn, side: sideFromParticipant } = parseRundownParticipantName(participantRaw);
+  const pr = participantRaw.trim();
+  let pn =
+    (row.playerName && row.playerName.split(/\s+/).filter(Boolean).length >= 2 ? row.playerName : parsedPn)?.trim() ?? "";
+
+  if ((!pn || pn.split(/\s+/).length < 2) && /^(over|under)$/i.test(pr)) {
+    const fromMk = tryLeadingPlayerFromPropMarketName(mkName);
+    if (fromMk) pn = fromMk;
+  }
+
+  const feedSide = sideFromParticipant ?? ouSideFromFeedExtras(p, ln);
+
+  if (stat === "hr" && pickKind === "yes_no") {
+    if (/\(yes\)|\(no\)/i.test(row.selection) && /\bhome\s*run|\bhomer\b|\bhr\b/i.test(row.selection)) {
+      return { ...row, marketType: mt, playerName: pn || row.playerName };
+    }
+    let isYes: boolean | null = /^yes\b/i.test(pr) ? true : /^no\b/i.test(pr) ? false : null;
+    if (isYes == null) {
+      if (/\(yes\)/i.test(row.selection)) isYes = true;
+      else if (/\(no\)/i.test(row.selection)) isYes = false;
+    }
+    if (pn.split(/\s+/).length < 2) {
+      const fromMk = tryLeadingPlayerFromPropMarketName(mkName);
+      if (fromMk) pn = fromMk;
+    }
+    if (pn.split(/\s+/).length >= 2 && isYes != null) {
+      return {
+        ...row,
+        marketType: mt,
+        pickKind: "yes_no",
+        line: null,
+        playerName: pn,
+        selection: `${pn} · To hit a home run (${isYes ? "Yes" : "No"})`
+      };
+    }
+  }
+
+  if (pickKind === "tier_plus" && row.line != null && Number.isFinite(Number(row.line))) {
+    const n = Math.round(Number(row.line));
+    if (!playerPropSelectionLooksStatBased(row.selection) && pn.split(/\s+/).length >= 2) {
+      return {
+        ...row,
+        marketType: mt,
+        pickKind: "tier_plus",
+        playerName: pn,
+        line: n,
+        selection: `${pn} · ${n}+ ${statLabelFor(stat)}`,
+        tierMin: row.tierMin ?? n
+      };
+    }
+    return { ...row, marketType: mt, pickKind: "tier_plus", playerName: pn || row.playerName };
+  }
+
+  if (pickKind === "over_under" && row.line != null && Number.isFinite(Number(row.line))) {
+    const lineN = Number(row.line);
+    if (playerPropSelectionLooksStatBased(row.selection) && row.selection.includes("·")) {
+      return { ...row, marketType: mt, playerName: pn || row.playerName, line: lineN };
+    }
+    const sideEff =
+      feedSide ??
+      (/\bover\b/i.test(row.selection) ? ("over" as const) : /\bunder\b/i.test(row.selection) ? ("under" as const) : undefined);
+    if (pn.split(/\s+/).length >= 2 && sideEff) {
+      return {
+        ...row,
+        marketType: mt,
+        pickKind: "over_under",
+        playerName: pn,
+        line: lineN,
+        selection: `${pn} · ${sideEff === "over" ? "Over" : "Under"} ${lineN} ${statLabelFor(stat)}`
+      };
+    }
+  }
+
+  return row.statKey ? { ...row, marketType: mt, playerName: pn || row.playerName } : row;
+}
+
 function ingestRundownEvents(
   events: any[],
   games: GameCard[],
@@ -247,7 +364,7 @@ function ingestRundownEvents(
             for (const pr of prices) {
               const selection = lineValue != null ? `${pname} ${lineValue > 0 ? `+${lineValue}` : lineValue}` : pname;
               const { playerName } = parseRundownParticipantName(pname);
-              out.push({
+              const raw: Market = {
                 id: `rundown-${eventId}-${String(mk?.market_id ?? mkName)}-${pr.source}-${i}-${li}`,
                 gameId: mappedGameId || eventId || `rundown-${date}`,
                 marketType,
@@ -260,7 +377,8 @@ function ingestRundownEvents(
                 pickKind,
                 rundownMarketId: Number.isFinite(mid) ? mid : undefined,
                 bookPropCode
-              });
+              };
+              out.push(marketType === "player_prop" ? shapeRundownPlayerPropRow(raw, mkName, pname, p, ln) : raw);
               emitted = true;
             }
           }
@@ -270,7 +388,7 @@ function ingestRundownEvents(
             const line = num(p?.points) ?? num(p?.line) ?? null;
             const selection = line != null ? `${pname} ${line > 0 ? `+${line}` : line}` : pname;
             const { playerName } = parseRundownParticipantName(pname);
-            out.push({
+            const raw: Market = {
               id: `rundown-${eventId}-${String(mk?.market_id ?? mkName)}-${grp.source}-${i}`,
               gameId: mappedGameId || eventId || `rundown-${date}`,
               marketType,
@@ -283,7 +401,8 @@ function ingestRundownEvents(
               pickKind,
               rundownMarketId: Number.isFinite(mid) ? mid : undefined,
               bookPropCode
-            });
+            };
+            out.push(marketType === "player_prop" ? shapeRundownPlayerPropRow(raw, mkName, pname, p, null) : raw);
           }
         }
       }

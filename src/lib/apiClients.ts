@@ -365,11 +365,9 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
   const merged = mergeFanDuelPrices([...base], games, events);
   // Odds-key mode: roster props rarely match Odds API line shapes; attach sportsbook-side props parsed from API.
   let out = merged;
-  if (useOddsProps) {
+  if (useOddsProps && events.length > 0) {
     const apiPlayer = buildPlayerPropsFromOddsEvents(events, games).filter((m) => m.gameId === gameId);
     out = [...merged, ...apiPlayer];
-  }
-  if (useOddsProps) {
     const sportsbook = out.filter((m) => isSportsbookLineSource(m.source));
     return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(sportsbook), games);
   }
@@ -395,7 +393,7 @@ export async function getAllMarkets(): Promise<Market[]> {
   const merged = [...core];
   const events = await fetchMlbOddsEvents();
   const priced = mergeFanDuelPrices(merged, games, events);
-  if (useOddsProps) {
+  if (useOddsProps && events.length > 0) {
     const apiPlayer = buildPlayerPropsFromOddsEvents(events, games);
     const out = [...priced, ...apiPlayer];
     const sportsbook = out.filter((m) => isSportsbookLineSource(m.source));
