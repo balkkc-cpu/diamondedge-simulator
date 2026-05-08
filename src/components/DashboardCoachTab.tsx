@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 type ReportLeg = {
   selection: string;
@@ -50,11 +50,9 @@ export function DashboardCoachTab() {
         { role: "coach", text: typeof data?.answer === "string" ? data.answer : "Coach could not generate a response." }
       ]);
       setReport(data?.parlayReport ?? null);
-      setActive("report");
     } catch {
       setMessage("Coach request failed. Please retry.");
       setReport(null);
-      setActive("coach");
     } finally {
       setLoading(false);
     }
@@ -86,12 +84,6 @@ export function DashboardCoachTab() {
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    if (!report && !loading) {
-      void generateRandomParlay();
-    }
-  }, []); // run once on first mount
 
   return (
     <section className="panel p-4">
