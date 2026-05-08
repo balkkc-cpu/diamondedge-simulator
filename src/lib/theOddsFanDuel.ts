@@ -101,13 +101,22 @@ function normPlayerName(s: string): string {
 
 const SIDE_WORD = /^(over|under|yes|no)$/i;
 
+/** Normalize common feed mojibake / separator artifacts into plain ASCII spacing. */
+function cleanFeedText(s: string): string {
+  return String(s ?? "")
+    .replace(/Â·|â€¢|â€˘|â—|A�/g, " ")
+    .replace(/[•·]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
  * Odds API player props usually put the batter/pitcher in `description` and Over/Under in `name`.
  * Some responses flip that — resolve a single player label without using loose substring matching.
  */
 function outcomePlayerLabel(o: OddsOutcome): string {
-  const name = (o.name ?? "").trim();
-  const desc = (o.description ?? "").trim();
+  const name = cleanFeedText((o.name ?? "").trim());
+  const desc = cleanFeedText((o.description ?? "").trim());
   if (desc && SIDE_WORD.test(name)) return desc;
   if (name && SIDE_WORD.test(desc)) return name;
   if (desc && !SIDE_WORD.test(desc)) return desc;
@@ -230,6 +239,26 @@ function statLabel(stat: StatKey): string {
   return stat === "k" ? PITCHER_MATRIX.k.label : HITTER_MATRIX[stat as Exclude<StatKey, "k">].label;
 }
 
+function isReasonablePlayerPropOutcome(
+  stat: StatKey,
+  pickKind: PickKind,
+  line: number | null,
+  american: number
+): boolean {
+  if (!Number.isFinite(american) || Math.abs(american) > 2500) return false;
+  if (pickKind === "yes_no") return stat === "hr";
+  if (line == null || !Number.isFinite(line)) return false;
+  if (line < 0 || line > 20) return false;
+  if (stat === "hits") return line <= 2.5;
+  if (stat === "tb") return line <= 3.5;
+  if (stat === "rbi") return line <= 2.5;
+  if (stat === "runs") return line <= 1.5;
+  if (stat === "hrr") return line <= 3.5;
+  if (stat === "walks") return line <= 1.5;
+  if (stat === "k") return line <= 10.5;
+  return true;
+}
+
 /** Build player prop markets straight from Odds API (all listed books) — avoids roster line mismatch. */
 export function buildPlayerPropsFromOddsEvents(events: unknown[], games: GameCard[]): Market[] {
   const rows: Market[] = [];
@@ -249,7 +278,7 @@ export function buildPlayerPropsFromOddsEvents(events: unknown[], games: GameCar
 
         for (const o of mk.outcomes ?? []) {
           if (typeof o.price !== "number") continue;
-          const playerName = outcomePlayerLabel(o).trim();
+          const playerName = cleanFeedText(outcomePlayerLabel(o).trim());
           if (!playerName || SIDE_WORD.test(playerName)) continue;
 
           const nm = String(o.name ?? "").trim().toLowerCase();
@@ -270,6 +299,7 @@ export function buildPlayerPropsFromOddsEvents(events: unknown[], games: GameCar
           } else {
             continue;
           }
+          if (!isReasonablePlayerPropOutcome(stat, pickKind, line, o.price)) continue;
 
           const id = `${game.id}-sb-${stat}-${idSlug(playerName)}-${idSlug(apiKey)}-${nm}-${String(pt ?? "x")}-${bkKey}`.slice(0, 120);
           rows.push({
