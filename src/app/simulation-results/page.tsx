@@ -351,7 +351,14 @@ export default function SimulationResultsPage() {
           );
         })}
       </section>
-      <ResultsCharts histogram={payload.histogram} />
+      <ResultsCharts
+        histogram={payload.histogram}
+        legs={(payload.results as SimRow[]).map((r) => ({
+          selection: byBetId.get(r.betId)?.selection ?? r.betId,
+          hitProbability: r.hitProbability,
+          edge: r.edge
+        }))}
+      />
       <section className="panel p-4 text-sm">
         <h3 className="font-semibold">Parlay quick read</h3>
         <p className="mt-1 text-slate-300">

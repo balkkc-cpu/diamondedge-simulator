@@ -271,9 +271,11 @@ async function duckDuckGoSummary(question: string): Promise<string | null> {
     const data = await res.json();
     const abstract = String(data?.AbstractText ?? "").trim();
     const heading = String(data?.Heading ?? "").trim();
+    const instant = String(data?.Answer ?? "").trim();
     const related = Array.isArray(data?.RelatedTopics) ? data.RelatedTopics : [];
     const firstRelated = related.find((x: any) => typeof x?.Text === "string")?.Text ?? "";
     if (abstract) return `${heading ? `${heading}: ` : ""}${abstract}`;
+    if (instant) return instant.length > 400 ? `${instant.slice(0, 397)}…` : instant;
     if (firstRelated) return String(firstRelated);
     return null;
   } catch {

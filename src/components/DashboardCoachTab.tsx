@@ -104,7 +104,6 @@ export function DashboardCoachTab() {
       setMessage(answer);
       setChat((prev) => [...prev, { role: "coach", text: answer }]);
       setReport(data?.parlayReport ?? null);
-      if (data?.parlayReport) setActive("report");
     } catch {
       const fallback = "Request failed. Try again in a moment.";
       setMessage(fallback);
@@ -130,7 +129,6 @@ export function DashboardCoachTab() {
       setMessage(answer);
       setChat((prev) => [...prev, { role: "coach", text: answer }]);
       setReport(data?.parlayReport ?? null);
-      if (data?.parlayReport) setActive("report");
     } catch {
       const fallback = "Request failed. Try again in a moment.";
       setMessage(fallback);
@@ -145,13 +143,25 @@ export function DashboardCoachTab() {
     <section className="panel p-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-lg font-semibold text-violet-200">Coach</h3>
-        <div className="flex gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           <button type="button" className={active === "coach" ? "btn-muted bg-slate-800/70" : "btn-muted"} onClick={() => setActive("coach")}>
             Coach
           </button>
           <button type="button" className={active === "report" ? "btn-muted bg-slate-800/70" : "btn-muted"} onClick={() => setActive("report")}>
             Sim Report
           </button>
+          {report ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-950/40 px-2 py-0.5 text-[10px] text-amber-100/90">
+              Metrics ready
+              <button
+                type="button"
+                className="rounded bg-amber-600/40 px-1.5 py-0.5 font-medium text-amber-50 hover:bg-amber-500/50"
+                onClick={() => setActive("report")}
+              >
+                Open
+              </button>
+            </span>
+          ) : null}
         </div>
       </div>
 
