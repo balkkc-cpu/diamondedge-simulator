@@ -7,6 +7,7 @@ import { GameCard } from "@/lib/types";
 import { buildSuggestedParlaysFromBoard } from "@/lib/suggestedParlays";
 import { DashboardSuggestedParlays } from "@/components/DashboardSuggestedParlays";
 import { DashboardCoachTab } from "@/components/DashboardCoachTab";
+import { DashboardHighlights } from "@/components/DashboardHighlights";
 
 export default async function DashboardPage() {
   const games: GameCard[] = await getDailySchedule();
@@ -61,6 +62,7 @@ export default async function DashboardPage() {
       </section>
 
       <DashboardCoachTab />
+      <DashboardHighlights />
 
       <section className="grid gap-4 md:grid-cols-2">
         <div className="panel p-4 text-sm">
