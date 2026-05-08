@@ -29,6 +29,8 @@ function american(n: number): string {
 export function DashboardCoachTab() {
   const [active, setActive] = useState<"coach" | "report">("coach");
   const [loading, setLoading] = useState(false);
+  const [question, setQuestion] = useState("");
+  const [chat, setChat] = useState<Array<{ role: "user" | "coach"; text: string }>>([]);
   const [message, setMessage] = useState("");
   const [report, setReport] = useState<ParlayReport | null>(null);
 
@@ -42,12 +44,44 @@ export function DashboardCoachTab() {
       });
       const data = await res.json();
       setMessage(typeof data?.answer === "string" ? data.answer : "Coach could not generate a response.");
+      setChat((prev) => [
+        ...prev,
+        { role: "user", text: "Generate a strong random 3-leg parlay from live board." },
+        { role: "coach", text: typeof data?.answer === "string" ? data.answer : "Coach could not generate a response." }
+      ]);
       setReport(data?.parlayReport ?? null);
       setActive("report");
     } catch {
       setMessage("Coach request failed. Please retry.");
       setReport(null);
       setActive("coach");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function askCoach() {
+    const q = question.trim();
+    if (!q || loading) return;
+    setLoading(true);
+    setChat((prev) => [...prev, { role: "user", text: q }]);
+    setQuestion("");
+    try {
+      const res = await fetch("/api/coach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q, payload: {} })
+      });
+      const data = await res.json();
+      const answer = typeof data?.answer === "string" ? data.answer : "Coach could not generate a response.";
+      setMessage(answer);
+      setChat((prev) => [...prev, { role: "coach", text: answer }]);
+      setReport(data?.parlayReport ?? null);
+      if (data?.parlayReport) setActive("report");
+    } catch {
+      const fallback = "Request failed. Try again in a moment.";
+      setMessage(fallback);
+      setChat((prev) => [...prev, { role: "coach", text: fallback }]);
     } finally {
       setLoading(false);
     }
@@ -75,13 +109,51 @@ export function DashboardCoachTab() {
 
       {active === "coach" ? (
         <div className="space-y-3 text-sm">
-          <p className="text-slate-300">
-            Tap once to generate a truly random mixed-prop parlay. Every request runs a fresh random sample and picks the strongest hit-rate ticket.
-          </p>
-          <button type="button" className="btn-muted text-sm" onClick={generateRandomParlay} disabled={loading}>
-            {loading ? "Generating..." : "Generate New Random Parlay"}
-          </button>
-          {message ? <p className="rounded border border-slate-700/70 bg-slate-950/60 p-2 text-xs text-slate-300 whitespace-pre-line">{message}</p> : null}
+          <p className="text-slate-300">Ask anything about props, edges, bankroll sizing, or request a random parlay.</p>
+          <div className="flex gap-2">
+            <input
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void askCoach();
+                }
+              }}
+              placeholder="Ask coach (e.g., build best 3-leg value parlay)"
+              className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+            />
+            <button type="button" className="btn-muted text-sm" onClick={askCoach} disabled={loading || !question.trim()}>
+              {loading ? "..." : "Ask"}
+            </button>
+            <button type="button" className="btn-muted text-sm" onClick={generateRandomParlay} disabled={loading}>
+              {loading ? "..." : "Generate"}
+            </button>
+          </div>
+          <div className="thin-scrollbar max-h-56 space-y-2 overflow-y-auto pr-1">
+            {chat.length ? (
+              chat.map((m, idx) => (
+                <div
+                  key={`${m.role}-${idx}`}
+                  className={`rounded border p-2 text-xs whitespace-pre-line ${
+                    m.role === "user"
+                      ? "border-sky-700/60 bg-sky-950/20 text-sky-100"
+                      : "border-slate-700/70 bg-slate-950/60 text-slate-200"
+                  }`}
+                >
+                  <span className="mb-1 block text-[10px] uppercase tracking-wide text-slate-400">
+                    {m.role === "user" ? "You" : "Coach"}
+                  </span>
+                  {m.text}
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-slate-500">No chat yet. Ask a question or generate a parlay.</p>
+            )}
+          </div>
+          {message && !chat.length ? (
+            <p className="rounded border border-slate-700/70 bg-slate-950/60 p-2 text-xs text-slate-300 whitespace-pre-line">{message}</p>
+          ) : null}
         </div>
       ) : (
         <div className="space-y-2 text-xs">

@@ -39,7 +39,7 @@ type ParlayReport = {
 };
 
 function coachWrap(answer: string): string {
-  return answer;
+  return `Here’s my read:\n${answer}`;
 }
 
 let lastGoodSportsbookProps: { at: number; markets: Market[] } | null = null;
