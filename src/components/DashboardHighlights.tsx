@@ -45,7 +45,7 @@ export function DashboardHighlights() {
       <div className="mb-3">
         <h3 className="text-lg font-semibold text-slate-100">Recent Game Highlights</h3>
         <p className="text-xs text-slate-400">
-          Clips from yesterday and earlier today. Use this for form/context before picking props.
+          One recap video per game from yesterday and earlier today.
         </p>
       </div>
 

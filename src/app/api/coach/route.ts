@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDailySchedule } from "@/lib/apiClients";
+import { getAllMarkets } from "@/lib/apiClients";
 import { rateLimit } from "@/lib/rateLimit";
 import { americanToDecimal, decimalToAmerican, isPlayerPropMarketType, isSportsbookLineSource } from "@/lib/odds";
 import { runSimulation1000 } from "@/lib/simEngine";
-import { buildPlayerPropsFromOddsEvents, fetchMlbOddsEvents, getOddsDebugState } from "@/lib/theOddsFanDuel";
-import { fetchRundownMarketsForToday, getRundownDebugState } from "@/lib/theRundown";
+import { getOddsDebugState } from "@/lib/theOddsFanDuel";
+import { getRundownDebugState } from "@/lib/theRundown";
 import type { Market, SlipBet } from "@/lib/types";
 
 type CoachReq = {
@@ -38,11 +38,8 @@ type ParlayReport = {
   }>;
 };
 
-const COACH_PERSONA =
-  "You are Diamond Edge Coach, an elite pro-bettor voice: direct, disciplined, probability-first, never hype. Use only live sportsbook odds + simulation context from this app.";
-
 function coachWrap(answer: string): string {
-  return `${COACH_PERSONA}\n\n${answer}`;
+  return answer;
 }
 
 let lastGoodSportsbookProps: { at: number; markets: Market[] } | null = null;
@@ -222,14 +219,8 @@ function questionMentionsBet(question: string, bet: SlipBet): boolean {
 }
 
 async function fetchLiveSportsbookMarkets(): Promise<Market[]> {
-  const provider = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
-  if (provider === "rundown") {
-    return fetchRundownMarketsForToday();
-  }
-  const [games, events] = await Promise.all([getDailySchedule(), fetchMlbOddsEvents()]);
-  if (!games.length || !events.length) return [];
-  const playerProps = buildPlayerPropsFromOddsEvents(events, games);
-  return playerProps.filter((m) => isSportsbookLineSource(m.source));
+  const board = await getAllMarkets();
+  return board.filter((m) => isSportsbookLineSource(m.source));
 }
 
 function toMarketFromSlipBet(b: SlipBet): Market {

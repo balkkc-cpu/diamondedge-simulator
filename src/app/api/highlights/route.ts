@@ -86,29 +86,33 @@ export async function GET() {
   for (const g of cappedGames) {
     const content = await safeJson(`${MLB_API}/game/${encodeURIComponent(g.id)}/content`);
     const items = content?.highlights?.highlights?.items ?? [];
-    for (const it of items.slice(0, 4)) {
-      const id = String(it?.id ?? `${g.id}-${out.length}`);
-      const title = String(it?.headline ?? "").trim();
-      const description = String(it?.blurb ?? it?.description ?? "").trim() || undefined;
-      const thumb = String(it?.image?.cuts?.["320x180"]?.src ?? it?.image?.cuts?.["640x360"]?.src ?? "").trim() || undefined;
-      const videoUrl = preferPlaybackUrl(it?.playbacks ?? []);
-      const sourceUrl = String(it?.url ?? "").trim() || undefined;
-      if (!videoUrl || !title) continue;
-      out.push({
-        id,
-        gameId: g.id,
-        matchup: g.matchup,
-        status: g.status,
-        gameTime: g.gameDate,
-        title,
-        description,
-        thumbnailUrl: thumb,
-        videoUrl,
-        sourceUrl
-      });
-    }
+    const recap =
+      items.find((it: any) => /recap/i.test(String(it?.headline ?? ""))) ??
+      items.find((it: any) => /recap/i.test(String(it?.blurb ?? ""))) ??
+      items[0];
+    if (!recap) continue;
+
+    const id = String(recap?.id ?? `${g.id}-${out.length}`);
+    const title = String(recap?.headline ?? "").trim();
+    const description = String(recap?.blurb ?? recap?.description ?? "").trim() || undefined;
+    const thumb = String(recap?.image?.cuts?.["320x180"]?.src ?? recap?.image?.cuts?.["640x360"]?.src ?? "").trim() || undefined;
+    const videoUrl = preferPlaybackUrl(recap?.playbacks ?? []);
+    const sourceUrl = String(recap?.url ?? "").trim() || undefined;
+    if (!videoUrl || !title) continue;
+    out.push({
+      id,
+      gameId: g.id,
+      matchup: g.matchup,
+      status: g.status,
+      gameTime: g.gameDate,
+      title,
+      description,
+      thumbnailUrl: thumb,
+      videoUrl,
+      sourceUrl
+    });
   }
 
-  return NextResponse.json({ clips: out.slice(0, 24) });
+  return NextResponse.json({ clips: out.slice(0, 8) });
 }
 
