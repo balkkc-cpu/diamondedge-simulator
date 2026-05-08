@@ -8,6 +8,7 @@ import { useBetStore } from "@/store/betStore";
 import { GameCard, Market, SlipBet } from "@/lib/types";
 import { isLegibleSportsbookPlayerProp } from "@/lib/odds";
 import type { OddsDebugState } from "@/lib/theOddsFanDuel";
+import type { RundownDebugState } from "@/lib/theRundown";
 
 function gameFromUrl(): string | null {
   if (typeof window === "undefined") return null;
@@ -20,7 +21,12 @@ export default function BetBuilderPage() {
     urlGameRef.current = gameFromUrl();
   }
 
-  const [data, setData] = useState<{ games: GameCard[]; allMarkets: Market[]; oddsDebug?: OddsDebugState } | null>(null);
+  const [data, setData] = useState<{
+    games: GameCard[];
+    allMarkets: Market[];
+    oddsProvider?: "rundown" | "the_odds_api";
+    oddsDebug?: OddsDebugState | RundownDebugState;
+  } | null>(null);
   const [gameId, setGameId] = useState<string>("mock-game-001");
   const [marketFilter, setMarketFilter] = useState<"all" | "lines" | "players_tabs" | "players_columns">("all");
   const [running, setRunning] = useState(false);
@@ -85,17 +91,47 @@ export default function BetBuilderPage() {
 
   const oddsBadge = useMemo(() => {
     if (!oddsDebug) return null;
-    if (oddsDebug.status === "ok") return { label: "LIVE ODDS OK", tone: "text-emerald-300 border-emerald-700/50 bg-emerald-950/30" };
-    if (oddsDebug.status === "missing_key") return { label: "NO ODDS KEY", tone: "text-amber-300 border-amber-700/50 bg-amber-950/30" };
-    if (oddsDebug.status === "http_error") return { label: `ODDS API ERROR ${oddsDebug.httpStatus ?? ""}`.trim(), tone: "text-rose-300 border-rose-700/50 bg-rose-950/30" };
-    if (oddsDebug.status === "no_events")
+    const fromRundown = data?.oddsProvider === "rundown";
+    const rd = fromRundown ? (oddsDebug as RundownDebugState) : null;
+    const httpCode =
+      "httpStatus" in oddsDebug && oddsDebug.httpStatus != null ? String(oddsDebug.httpStatus) : "";
+
+    if (oddsDebug.status === "ok" && rd?.boardSource === "stale_cache") {
       return {
-        label: "BOOK API EMPTY — NO LIVE LINES",
+        label: "RUNDOWN RATE LIMITED — USING CACHED BOARD",
         tone: "text-amber-300 border-amber-700/50 bg-amber-950/30"
       };
-    if (oddsDebug.status === "exception") return { label: "ODDS FETCH EXCEPTION", tone: "text-rose-300 border-rose-700/50 bg-rose-950/30" };
-    return { label: "ODDS STATUS UNKNOWN", tone: "text-slate-300 border-slate-700/50 bg-slate-900/40" };
-  }, [oddsDebug]);
+    }
+    if (oddsDebug.status === "ok") {
+      return {
+        label: fromRundown ? "RUNDOWN FEED OK" : "LIVE ODDS OK",
+        tone: "text-emerald-300 border-emerald-700/50 bg-emerald-950/30"
+      };
+    }
+    if (oddsDebug.status === "missing_key") {
+      return {
+        label: fromRundown ? "NO RUNDOWN API KEY" : "NO ODDS API KEY",
+        tone: "text-amber-300 border-amber-700/50 bg-amber-950/30"
+      };
+    }
+    if (oddsDebug.status === "http_error") {
+      return {
+        label: `${fromRundown ? "RUNDOWN API" : "ODDS API"} ERROR ${httpCode}`.trim(),
+        tone: "text-rose-300 border-rose-700/50 bg-rose-950/30"
+      };
+    }
+    if (oddsDebug.status === "no_events")
+      return {
+        label: fromRundown ? "RUNDOWN RETURNED NO EVENTS" : "BOOK API EMPTY — NO LIVE LINES",
+        tone: "text-amber-300 border-amber-700/50 bg-amber-950/30"
+      };
+    if (oddsDebug.status === "exception")
+      return {
+        label: fromRundown ? "RUNDOWN FETCH EXCEPTION" : "ODDS FETCH EXCEPTION",
+        tone: "text-rose-300 border-rose-700/50 bg-rose-950/30"
+      };
+    return { label: "LINE FEED STATUS UNKNOWN", tone: "text-slate-300 border-slate-700/50 bg-slate-900/40" };
+  }, [oddsDebug, data?.oddsProvider]);
 
   async function saveSlipToServer() {
     setSaveMsg("");
@@ -150,7 +186,9 @@ export default function BetBuilderPage() {
             {oddsBadge ? (
               <div className={`mt-2 inline-flex items-center gap-2 rounded-md border px-2 py-1 text-[11px] ${oddsBadge.tone}`}>
                 <span className="font-semibold">{oddsBadge.label}</span>
-                {typeof oddsDebug?.remaining === "string" ? <span>remaining: {oddsDebug.remaining}</span> : null}
+                {"remaining" in (oddsDebug ?? {}) && typeof (oddsDebug as OddsDebugState).remaining === "string" ? (
+                  <span>remaining: {(oddsDebug as OddsDebugState).remaining}</span>
+                ) : null}
                 {oddsDebug?.detail ? <span className="text-slate-300/90">· {oddsDebug.detail}</span> : null}
               </div>
             ) : null}

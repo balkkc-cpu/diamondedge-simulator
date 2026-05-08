@@ -114,6 +114,18 @@ function uniqueSorted(nums: number[]): number[] {
   return [...new Set(nums)].sort((a, b) => a - b);
 }
 
+/**
+ * Next.js `fetch` revalidate for The Rundown HTTP calls (seconds).
+ * Default 15 minutes to avoid upstream HTTP 429 bursts; override with RUNDOWN_FETCH_REVALIDATE_SECONDS.
+ */
+export function rundownHttpRevalidateSeconds(): number {
+  const raw = process.env.RUNDOWN_FETCH_REVALIDATE_SECONDS ?? process.env.RUNDOWN_REVALIDATE_SECONDS;
+  if (raw == null || String(raw).trim() === "") return 900;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 60) return 60;
+  return Math.min(Math.floor(n), 86_400 * 7);
+}
+
 /** GET /api/v2/sports/{sport}/markets/{date} — market definitions with `proposition` flags. */
 export async function fetchRundownMarketsCatalogForSportDate(
   sportId: string,
@@ -127,7 +139,7 @@ export async function fetchRundownMarketsCatalogForSportDate(
 
   const res = await fetch(url, {
     headers: rundownRequestHeaders(apiKey),
-    next: { revalidate: 600 }
+    next: { revalidate: rundownHttpRevalidateSeconds() }
   });
   if (!res.ok) return { defs: [], httpStatus: res.status };
   let data: Record<string, unknown>;

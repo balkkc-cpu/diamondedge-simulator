@@ -8,6 +8,7 @@ import {
   inferPickKindFromRundownDef,
   inferStatKeyFromRundownDef,
   parseRundownParticipantName,
+  rundownHttpRevalidateSeconds,
   rundownRequestHeaders,
   type RundownMarketDef
 } from "./rundownMarketIds";
@@ -15,6 +16,10 @@ import {
 export type RundownDebugState = {
   status: "idle" | "ok" | "missing_key" | "http_error" | "no_events" | "exception";
   detail?: string;
+  /** Present when `status` is `http_error` (e.g. upstream 429 rate limit). */
+  httpStatus?: number;
+  /** Live fetch vs last-good snapshot when Rundown rate-limits or errors. */
+  boardSource?: "live" | "stale_cache";
   updatedAt: string;
 };
 
@@ -31,6 +36,10 @@ function setRundownDebug(state: Omit<RundownDebugState, "updatedAt">) {
 export function getRundownDebugState(): RundownDebugState {
   return lastRundownDebug;
 }
+
+/** Last successful Rundown board for this server instance (same ET date + sport + affiliate scope). */
+const LAST_GOOD_RUNDOWN_TTL_MS = 1000 * 60 * 60 * 24;
+let lastGoodRundownBoard: { cacheKey: string; markets: Market[]; at: number } | null = null;
 
 function todayYmdEt(now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -419,16 +428,25 @@ async function fetchRundownEventsPage(
   key: string,
   affiliateIds?: string
 ): Promise<{ ok: boolean; events: any[]; status: number }> {
-  let url =
-    `https://therundown.io/api/v2/sports/${encodeURIComponent(sportId)}/events/${encodeURIComponent(date)}` +
-    `?market_ids=${encodeURIComponent(marketIdsParam)}&offset=${encodeURIComponent(offset)}`;
-  if (affiliateIds) {
-    url += `&affiliate_ids=${encodeURIComponent(affiliateIds)}`;
+  const rev = rundownHttpRevalidateSeconds();
+  async function doFetch(): Promise<Response> {
+    let url =
+      `https://therundown.io/api/v2/sports/${encodeURIComponent(sportId)}/events/${encodeURIComponent(date)}` +
+      `?market_ids=${encodeURIComponent(marketIdsParam)}&offset=${encodeURIComponent(offset)}`;
+    if (affiliateIds) {
+      url += `&affiliate_ids=${encodeURIComponent(affiliateIds)}`;
+    }
+    return fetch(url, {
+      headers: rundownRequestHeaders(key),
+      next: { revalidate: rev }
+    });
   }
-  const res = await fetch(url, {
-    headers: rundownRequestHeaders(key),
-    next: { revalidate: 120 }
-  });
+
+  let res = await doFetch();
+  if (res.status === 429 || res.status === 503) {
+    await new Promise((r) => setTimeout(r, 3200));
+    res = await doFetch();
+  }
   if (!res.ok) return { ok: false, events: [], status: res.status };
   try {
     const data = await res.json();
@@ -466,17 +484,48 @@ export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promi
     if (row.live_variant_id != null && row.live_variant_id > 0) metaByMarketId.set(row.live_variant_id, row);
   }
 
+  const boardCacheKey = `${sportId}|${date}|${affiliateIds ?? ""}`;
+
   try {
     const primary = await fetchRundownEventsPage(sportId, date, offset, marketIdsParam, key, affiliateIds);
     if (!primary.ok) {
+      const stale =
+        lastGoodRundownBoard?.cacheKey === boardCacheKey &&
+        Date.now() - lastGoodRundownBoard.at < LAST_GOOD_RUNDOWN_TTL_MS &&
+        lastGoodRundownBoard.markets.length > 0;
+
+      if (stale) {
+        setRundownDebug({
+          status: "ok",
+          boardSource: "stale_cache",
+          httpStatus: undefined,
+          detail: `${lastGoodRundownBoard!.markets.length} cached rows after HTTP ${primary.status} (Rundown primary events fetch). Fresh data when the next cache window allows.`
+        });
+        return lastGoodRundownBoard!.markets;
+      }
+
       setRundownDebug({
         status: "http_error",
+        httpStatus: primary.status,
         detail: `${primary.status} events fetch (primary market_ids batch)`
       });
       return [];
     }
     if (!primary.events.length) {
-      setRundownDebug({ status: "no_events", detail: "No events returned from Rundown" });
+      const staleEmpty =
+        lastGoodRundownBoard?.cacheKey === boardCacheKey &&
+        Date.now() - lastGoodRundownBoard.at < LAST_GOOD_RUNDOWN_TTL_MS &&
+        lastGoodRundownBoard.markets.length > 0;
+      if (staleEmpty) {
+        setRundownDebug({
+          status: "ok",
+          boardSource: "stale_cache",
+          httpStatus: undefined,
+          detail: `${lastGoodRundownBoard!.markets.length} cached rows (Rundown returned no events for this request).`
+        });
+        return lastGoodRundownBoard!.markets;
+      }
+      setRundownDebug({ status: "no_events", detail: "No events returned from Rundown", httpStatus: undefined });
       return [];
     }
 
@@ -485,6 +534,7 @@ export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promi
     const propRowsNow = () => out.filter((m) => isPlayerPropMarketType(m.marketType));
 
     if (propRowsNow().length === 0 && affiliateIds) {
+      await new Promise((r) => setTimeout(r, 500));
       const bare = await fetchRundownEventsPage(sportId, date, offset, marketIdsParam, key, undefined);
       if (bare.ok && bare.events.length) {
         const alt = ingestRundownEvents(bare.events, games, metaByMarketId, date);
@@ -500,7 +550,11 @@ export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promi
       for (const m of out) dedupe.set(m.id, m);
       const core = [1, 2, 3];
       let batches = 0;
+      const batchDelayMs = Math.max(0, Math.min(5000, Number(process.env.RUNDOWN_BATCH_DELAY_MS ?? "700") || 700));
       for (let s = 0; s < discoveredPropIds.length && batches < MAX_BATCHES; s += BATCH) {
+        if (batches > 0 && batchDelayMs > 0) {
+          await new Promise((r) => setTimeout(r, batchDelayMs));
+        }
         const chunk = discoveredPropIds.slice(s, s + BATCH);
         const param = [...new Set([...core, ...chunk])].sort((a, b) => a - b).join(",");
         const page = await fetchRundownEventsPage(sportId, date, offset, param, key, affiliateIds);
@@ -514,8 +568,13 @@ export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promi
     }
 
     const propRows = out.filter((m) => isPlayerPropMarketType(m.marketType));
+    if (out.length) {
+      lastGoodRundownBoard = { cacheKey: boardCacheKey, markets: out, at: Date.now() };
+    }
     setRundownDebug({
       status: out.length ? "ok" : "no_events",
+      boardSource: out.length ? "live" : undefined,
+      httpStatus: undefined,
       detail: `${out.length} priced rows · ${propRows.length} player-prop rows · ${primary.events.length} events (primary) · catalog http ${catalogHttpStatus} · proposition defs ${catalogPropositions} · merged market_ids ${marketIdsParam.split(",").length} (discovered prop ids ${discoveredPropIds.length})`
     });
     return out;

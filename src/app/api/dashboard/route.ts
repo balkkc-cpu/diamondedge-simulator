@@ -16,11 +16,15 @@ export async function GET(req: Request) {
     getWeatherFallback()
   ]);
 
+  const providerRaw = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
+  const oddsProvider = providerRaw === "rundown" ? ("rundown" as const) : ("the_odds_api" as const);
+
   return NextResponse.json({
     games,
     allMarkets,
     injuries,
     weather,
-    oddsDebug: String(process.env.ODDS_PROVIDER ?? "").toLowerCase() === "rundown" ? getRundownDebugState() : getOddsDebugState()
+    oddsProvider,
+    oddsDebug: oddsProvider === "rundown" ? getRundownDebugState() : getOddsDebugState()
   });
 }
