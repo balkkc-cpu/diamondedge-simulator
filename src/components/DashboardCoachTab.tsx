@@ -26,6 +26,35 @@ function american(n: number): string {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
+function Meter({
+  label,
+  value,
+  tone = "sky"
+}: {
+  label: string;
+  value: number;
+  tone?: "sky" | "emerald" | "amber";
+}) {
+  const pctValue = Math.max(0, Math.min(100, value * 100));
+  const toneClass =
+    tone === "emerald"
+      ? "bg-emerald-500"
+      : tone === "amber"
+        ? "bg-amber-500"
+        : "bg-sky-500";
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[11px] text-slate-400">
+        <span>{label}</span>
+        <span>{pct(value, 2)}</span>
+      </div>
+      <div className="h-2 w-full rounded bg-slate-800/80">
+        <div className={`h-2 rounded ${toneClass}`} style={{ width: `${pctValue}%` }} />
+      </div>
+    </div>
+  );
+}
+
 export function DashboardCoachTab() {
   const [active, setActive] = useState<"coach" | "report">("coach");
   const [loading, setLoading] = useState(false);
@@ -85,6 +114,33 @@ export function DashboardCoachTab() {
     }
   }
 
+  async function askPreset(q: string) {
+    if (loading) return;
+    setQuestion(q);
+    setLoading(true);
+    setChat((prev) => [...prev, { role: "user", text: q }]);
+    try {
+      const res = await fetch("/api/coach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q, payload: {} })
+      });
+      const data = await res.json();
+      const answer = typeof data?.answer === "string" ? data.answer : "Coach could not generate a response.";
+      setMessage(answer);
+      setChat((prev) => [...prev, { role: "coach", text: answer }]);
+      setReport(data?.parlayReport ?? null);
+      if (data?.parlayReport) setActive("report");
+    } catch {
+      const fallback = "Request failed. Try again in a moment.";
+      setMessage(fallback);
+      setChat((prev) => [...prev, { role: "coach", text: fallback }]);
+    } finally {
+      setLoading(false);
+      setQuestion("");
+    }
+  }
+
   return (
     <section className="panel p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -102,6 +158,17 @@ export function DashboardCoachTab() {
       {active === "coach" ? (
         <div className="space-y-3 text-sm">
           <p className="text-slate-300">Ask anything about props, edges, bankroll sizing, or request a random parlay.</p>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-muted text-xs" onClick={() => void askPreset("Build best value 3-leg parlay")}>
+              Best Value 3-Leg
+            </button>
+            <button className="btn-muted text-xs" onClick={() => void askPreset("Build safest 3-leg parlay by hit chance")}>
+              Safest 3-Leg
+            </button>
+            <button className="btn-muted text-xs" onClick={() => void askPreset("Give me latest injury/weather/news angles before betting")}>
+              News/Context Angles
+            </button>
+          </div>
           <div className="flex gap-2">
             <input
               value={question}
@@ -159,12 +226,19 @@ export function DashboardCoachTab() {
               <div className="rounded border border-slate-700/70 bg-slate-950/60 p-2">
                 <p className="text-slate-200">Parlay hit chance: <span className="font-semibold">{pct(report.parlayHitProbability, 2)}</span></p>
                 <p className="text-slate-400">Combined odds: {american(report.combinedAmerican)}</p>
+                <div className="mt-2">
+                  <Meter label="Parlay Probability Meter" value={report.parlayHitProbability} tone="amber" />
+                </div>
               </div>
               <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
                 {report.legs.map((leg, idx) => (
                   <div key={`${leg.selection}-${idx}`} className="rounded border border-slate-700/60 bg-slate-950/40 p-2">
                     <p className="font-medium text-slate-100">{leg.selection}</p>
                     <p className="text-slate-400">Odds: {american(leg.oddsAmerican)} · Hit: {pct(leg.hitProbability, 2)} · Implied: {pct(leg.impliedProbability, 2)}</p>
+                    <div className="mt-2 space-y-2">
+                      <Meter label="Hit probability" value={leg.hitProbability} tone="emerald" />
+                      <Meter label="Implied probability" value={leg.impliedProbability} tone="sky" />
+                    </div>
                     <p className={leg.edge >= 0 ? "text-emerald-300" : "text-rose-300"}>
                       Edge: {pct(leg.edge, 2)} · EV: {leg.expectedValue.toFixed(2)}u · Units: {leg.suggestedUnits}
                     </p>
