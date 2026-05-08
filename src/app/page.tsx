@@ -15,7 +15,12 @@ export default async function DashboardPage() {
   const weather = await getWeatherFallback();
   const daily = await getDailyPicksPayload();
   const allMarkets = await getAllMarkets();
-  const parlays = await buildSuggestedParlaysFromBoard({ games, markets: allMarkets, parlayLegs: 3 });
+  const parlays = await buildSuggestedParlaysFromBoard({
+    games,
+    markets: allMarkets,
+    parlayLegs: 3,
+    diversitySeed: Date.now()
+  });
 
   return (
     <main className="grid gap-4">

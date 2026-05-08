@@ -1,4 +1,5 @@
 import { filterLegiblePlayerPropsForSlate, isPlayerPropMarketType, isSportsbookLineSource } from "@/lib/odds";
+import { createSeededRng, hashSeed, shuffleInPlace } from "@/lib/parlaySampling";
 import { runSimulation1000 } from "@/lib/simEngine";
 import { explainLeg } from "@/lib/simExplain";
 import type { GameCard, Market, SlipBet } from "@/lib/types";
@@ -70,15 +71,47 @@ function buildRunEnvironmentNote(games: GameCard[], simHistogram: Array<{ runs: 
   return noteBits.join(" ");
 }
 
-function pickTopLegs(
+function playerFromSelection(selection: string): string {
+  const idx = selection.indexOf("·");
+  const head = idx >= 0 ? selection.slice(0, idx) : selection;
+  return head.trim().toLowerCase().slice(0, 56);
+}
+
+/** Picks legs with different players/games when possible; uses seeded shuffle so each refresh varies. */
+function pickLegsDiverse(
   candidates: SuggestedParlayLeg[],
   targetLegs: number,
-  minHit: number
+  minHit: number,
+  rng: () => number
 ): SuggestedParlayLeg[] {
-  const scored = candidates
-    .filter((x) => x.hitProbability >= minHit)
-    .sort((a, b) => (b.edge + b.hitProbability * 0.6) - (a.edge + a.hitProbability * 0.6));
-  return scored.slice(0, Math.min(targetLegs, scored.length));
+  const pool = shuffleInPlace(
+    candidates.filter((x) => x.hitProbability >= minHit),
+    rng
+  );
+  const out: SuggestedParlayLeg[] = [];
+  const usedPlayers = new Set<string>();
+  const usedGames = new Set<string>();
+
+  for (const c of pool) {
+    if (out.length >= targetLegs) break;
+    const pk = playerFromSelection(c.selection);
+    if (pk && usedPlayers.has(pk)) continue;
+    if (usedGames.has(c.gameId)) continue;
+    if (pk) usedPlayers.add(pk);
+    usedGames.add(c.gameId);
+    out.push(c);
+  }
+  for (const c of pool) {
+    if (out.length >= targetLegs) break;
+    const pk = playerFromSelection(c.selection);
+    if (pk && out.some((x) => playerFromSelection(x.selection) === pk)) continue;
+    out.push(c);
+  }
+  for (const c of pool) {
+    if (out.length >= targetLegs) break;
+    if (!out.some((x) => x.betId === c.betId)) out.push(c);
+  }
+  return out.slice(0, targetLegs);
 }
 
 export async function buildSuggestedParlaysFromBoard(input: {
@@ -86,9 +119,12 @@ export async function buildSuggestedParlaysFromBoard(input: {
   markets: Market[];
   parlayLegs?: 2 | 3 | 4;
   iterations?: number;
+  /** Vary parlay makeup across page loads / API calls. */
+  diversitySeed?: number;
 }): Promise<SuggestedParlayCard[]> {
   const iterations = input.iterations ?? 1200;
   const parlayLegs = input.parlayLegs ?? 3;
+  const diversitySeed = input.diversitySeed ?? hashSeed([String(Date.now()), String(Math.random())]);
 
   const board = filterLegiblePlayerPropsForSlate(
     input.markets.filter((m) => isPlayerPropMarketType(m.marketType) && isSportsbookLineSource(m.source)),
@@ -134,8 +170,15 @@ export async function buildSuggestedParlaysFromBoard(input: {
     rbis: enriched.filter((x) => classifyMarket({ id: x.betId, gameId: x.gameId, marketType: x.marketType, selection: x.selection, line: null, american: 0, source: "" }) === "rbis")
   };
 
-  const mixedPool = [...enriched].sort((a, b) => b.hitProbability - a.hitProbability).slice(0, 12);
-  const mixedLegs = pickTopLegs(mixedPool, parlayLegs, 0.25);
+  const mixedScored = [...enriched]
+    .sort((a, b) => b.edge + b.hitProbability * 0.6 - (a.edge + a.hitProbability * 0.6))
+    .slice(0, 36);
+  const mixedLegs = pickLegsDiverse(
+    mixedScored,
+    parlayLegs,
+    0.25,
+    createSeededRng(hashSeed(["mixed", String(diversitySeed), String(parlayLegs)]))
+  );
 
   const simContext = {
     iterations,
@@ -148,28 +191,48 @@ export async function buildSuggestedParlaysFromBoard(input: {
     {
       title: "Home Run parlay (high payout, lower hit rate)",
       kind: "hr" as const,
-      legs: pickTopLegs(byKind.hr, Math.min(2, parlayLegs), 0.08),
+      legs: pickLegsDiverse(
+        [...byKind.hr].sort((a, b) => b.hitProbability - a.hitProbability).slice(0, 36),
+        Math.min(2, parlayLegs),
+        0.08,
+        createSeededRng(hashSeed(["hr", String(diversitySeed)]))
+      ),
       parlayHitProbability: 0,
       simContext
     },
     {
       title: "Total bases parlay",
       kind: "bases" as const,
-      legs: pickTopLegs(byKind.bases, parlayLegs, 0.2),
+      legs: pickLegsDiverse(
+        [...byKind.bases].sort((a, b) => b.edge + b.hitProbability * 0.55 - (a.edge + a.hitProbability * 0.55)).slice(0, 40),
+        parlayLegs,
+        0.2,
+        createSeededRng(hashSeed(["bases", String(diversitySeed)]))
+      ),
       parlayHitProbability: 0,
       simContext
     },
     {
       title: "Hits parlay",
       kind: "hits" as const,
-      legs: pickTopLegs(byKind.hits, parlayLegs, 0.2),
+      legs: pickLegsDiverse(
+        [...byKind.hits].sort((a, b) => b.edge + b.hitProbability * 0.55 - (a.edge + a.hitProbability * 0.55)).slice(0, 40),
+        parlayLegs,
+        0.2,
+        createSeededRng(hashSeed(["hits", String(diversitySeed)]))
+      ),
       parlayHitProbability: 0,
       simContext
     },
     {
       title: "RBIs parlay",
       kind: "rbis" as const,
-      legs: pickTopLegs(byKind.rbis, parlayLegs, 0.2),
+      legs: pickLegsDiverse(
+        [...byKind.rbis].sort((a, b) => b.edge + b.hitProbability * 0.55 - (a.edge + a.hitProbability * 0.55)).slice(0, 40),
+        parlayLegs,
+        0.2,
+        createSeededRng(hashSeed(["rbis", String(diversitySeed)]))
+      ),
       parlayHitProbability: 0,
       simContext
     },

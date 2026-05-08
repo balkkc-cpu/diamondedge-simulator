@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ResultsCharts } from "@/components/ResultsCharts";
+import { createSeededRng, hashSeed, shuffleInPlace } from "@/lib/parlaySampling";
 import { buildAutoCoachIntro } from "@/lib/simCoach";
 
 type LegBreakdown = {
@@ -59,15 +60,21 @@ function pickParlay(
   title: string,
   style: string,
   rows: Array<{ betId: string; selection: string; hitProbability: number; edge: number }>,
-  opts?: { minLegs?: number; maxLegs?: number; minHit?: number }
+  opts?: { minLegs?: number; maxLegs?: number; minHit?: number; shuffleSalt?: number }
 ): SuggestedParlay {
   const minLegs = opts?.minLegs ?? 2;
   const maxLegs = opts?.maxLegs ?? 3;
   const minHit = opts?.minHit ?? 0;
-  const sorted = [...rows]
+  const salt = opts?.shuffleSalt ?? 0;
+  const ranked = [...rows]
     .filter((r) => r.hitProbability >= minHit)
-    .sort((a, b) => (b.edge + b.hitProbability * 0.6) - (a.edge + a.hitProbability * 0.6));
-  const legs = sorted.slice(0, Math.max(minLegs, Math.min(maxLegs, sorted.length)));
+    .sort((a, b) => b.edge + b.hitProbability * 0.6 - (a.edge + a.hitProbability * 0.6));
+  const pool = shuffleInPlace(
+    ranked.slice(0, Math.max(maxLegs * 4, 14)),
+    createSeededRng(hashSeed([title, style, String(salt), ranked.map((r) => r.betId).join("|")]))
+  );
+  const target = Math.max(minLegs, Math.min(maxLegs, pool.length));
+  const legs = pool.slice(0, target);
   const parlayHitProbability = legs.reduce((acc, x) => acc * x.hitProbability, 1);
   return {
     title,
@@ -75,7 +82,7 @@ function pickParlay(
     legs,
     parlayHitProbability: legs.length ? parlayHitProbability : 0,
     note: legs.length
-      ? `Built from your strongest ${style} legs in this sim run.`
+      ? `Built from your sim run (${style}); shuffle again for a different mix from the same slip.`
       : `No qualifying ${style} legs were found in this slip.`
   };
 }
@@ -84,6 +91,7 @@ export default function SimulationResultsPage() {
   const [payload, setPayload] = useState<any>(null);
   const [saveMsg, setSaveMsg] = useState("");
   const [parlaySize, setParlaySize] = useState<ParlayPreset>(3);
+  const [parlayShuffle, setParlayShuffle] = useState(0);
   const [coachInput, setCoachInput] = useState("");
   const [coachMessages, setCoachMessages] = useState<Array<{ role: "user" | "coach"; text: string }>>([]);
   const [coachLoading, setCoachLoading] = useState(false);
@@ -91,6 +99,7 @@ export default function SimulationResultsPage() {
   async function askCoach(raw: string) {
     const q = raw.trim();
     if (!q || coachLoading) return;
+    const nextHistory = [...coachMessages, { role: "user" as const, text: q }];
     setCoachMessages((prev) => [...prev, { role: "user", text: q }]);
     setCoachInput("");
     setCoachLoading(true);
@@ -98,7 +107,7 @@ export default function SimulationResultsPage() {
       const res = await fetch("/api/coach", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, payload })
+        body: JSON.stringify({ question: q, payload, history: nextHistory })
       });
       const data = await res.json();
       const answer = typeof data?.answer === "string" ? data.answer : "Coach could not answer right now. Try again.";
@@ -166,17 +175,31 @@ export default function SimulationResultsPage() {
 
     const maxLegs = parlaySize;
     const minLegs = Math.min(2, maxLegs);
+    const shuffleSalt = parlayShuffle + stableHash((payload.results as SimRow[]).map((r) => r.betId).join("|"));
 
-    const hr = pickParlay("Home Run Parlay", "home run", hrRows, { minLegs, maxLegs: Math.min(2, maxLegs), minHit: 0.08 });
-    const bases = pickParlay("Total Bases Parlay", "total bases", baseRows, { minLegs, maxLegs, minHit: 0.2 });
-    const hits = pickParlay("Hits Parlay", "hits", hitRows, { minLegs, maxLegs, minHit: 0.2 });
-    const rbis = pickParlay("RBIs Parlay", "RBIs", rbiRows, { minLegs, maxLegs, minHit: 0.2 });
+    const hr = pickParlay("Home Run Parlay", "home run", hrRows, {
+      minLegs,
+      maxLegs: Math.min(2, maxLegs),
+      minHit: 0.08,
+      shuffleSalt
+    });
+    const bases = pickParlay("Total Bases Parlay", "total bases", baseRows, {
+      minLegs,
+      maxLegs,
+      minHit: 0.2,
+      shuffleSalt
+    });
+    const hits = pickParlay("Hits Parlay", "hits", hitRows, { minLegs, maxLegs, minHit: 0.2, shuffleSalt });
+    const rbis = pickParlay("RBIs Parlay", "RBIs", rbiRows, { minLegs, maxLegs, minHit: 0.2, shuffleSalt });
 
-    const safestPool = [...rows].sort((a, b) => b.hitProbability - a.hitProbability).slice(0, 10);
+    const safestPool = shuffleInPlace(
+      [...rows].sort((a, b) => b.hitProbability - a.hitProbability).slice(0, 14),
+      createSeededRng(hashSeed(["mixed", String(shuffleSalt), String(maxLegs)]))
+    );
     const seed = stableHash(safestPool.map((x) => x.betId).join("|"));
     const mixed: typeof safestPool = [];
     for (let i = 0; i < safestPool.length && mixed.length < maxLegs; i++) {
-      const idx = (seed + i * 5) % safestPool.length;
+      const idx = (seed + i * 5 + parlayShuffle * 7) % safestPool.length;
       const next = safestPool[idx];
       if (next && !mixed.some((m) => m.betId === next.betId)) mixed.push(next);
     }
@@ -189,7 +212,7 @@ export default function SimulationResultsPage() {
     };
 
     return [hr, bases, hits, rbis, randomGood];
-  }, [payload, byBetId, parlaySize]);
+  }, [payload, byBetId, parlaySize, parlayShuffle]);
 
   if (!payload) return <main className="panel p-4">No simulation yet. Run one from Bet Builder.</main>;
 
@@ -413,6 +436,9 @@ export default function SimulationResultsPage() {
             onClick={() => setParlaySize(4)}
           >
             4-leg (lotto)
+          </button>
+          <button type="button" className="btn-muted" onClick={() => setParlayShuffle((n) => n + 1)}>
+            Shuffle mixes
           </button>
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-2">

@@ -13,7 +13,12 @@ export async function GET(req: Request) {
   const legs = (legsRaw === 2 || legsRaw === 3 || legsRaw === 4 ? legsRaw : 3) as 2 | 3 | 4;
 
   const [games, markets] = await Promise.all([getDailySchedule(), getAllMarkets()]);
-  const parlays = await buildSuggestedParlaysFromBoard({ games, markets, parlayLegs: legs });
+  const parlays = await buildSuggestedParlaysFromBoard({
+    games,
+    markets,
+    parlayLegs: legs,
+    diversitySeed: Date.now()
+  });
   return NextResponse.json({ parlays });
 }
 
