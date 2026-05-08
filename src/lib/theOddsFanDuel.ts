@@ -239,26 +239,6 @@ function statLabel(stat: StatKey): string {
   return stat === "k" ? PITCHER_MATRIX.k.label : HITTER_MATRIX[stat as Exclude<StatKey, "k">].label;
 }
 
-function isReasonablePlayerPropOutcome(
-  stat: StatKey,
-  pickKind: PickKind,
-  line: number | null,
-  american: number
-): boolean {
-  if (!Number.isFinite(american) || Math.abs(american) > 2500) return false;
-  if (pickKind === "yes_no") return stat === "hr";
-  if (line == null || !Number.isFinite(line)) return false;
-  if (line < 0 || line > 20) return false;
-  if (stat === "hits") return line <= 2.5;
-  if (stat === "tb") return line <= 3.5;
-  if (stat === "rbi") return line <= 2.5;
-  if (stat === "runs") return line <= 1.5;
-  if (stat === "hrr") return line <= 3.5;
-  if (stat === "walks") return line <= 1.5;
-  if (stat === "k") return line <= 10.5;
-  return true;
-}
-
 /** Build player prop markets straight from Odds API (all listed books) — avoids roster line mismatch. */
 export function buildPlayerPropsFromOddsEvents(events: unknown[], games: GameCard[]): Market[] {
   const rows: Market[] = [];
@@ -299,8 +279,6 @@ export function buildPlayerPropsFromOddsEvents(events: unknown[], games: GameCar
           } else {
             continue;
           }
-          if (!isReasonablePlayerPropOutcome(stat, pickKind, line, o.price)) continue;
-
           const id = `${game.id}-sb-${stat}-${idSlug(playerName)}-${idSlug(apiKey)}-${nm}-${String(pt ?? "x")}-${bkKey}`.slice(0, 120);
           rows.push({
             id,

@@ -6,7 +6,7 @@ import { GameLinesRow, PlayerPropColumns } from "@/components/PlayerPropColumns"
 import { PlayerTabsBoard } from "@/components/PlayerTabsBoard";
 import { useBetStore } from "@/store/betStore";
 import { GameCard, Market, SlipBet } from "@/lib/types";
-import { isLegibleSportsbookPlayerProp } from "@/lib/odds";
+import { isPlayerPropMarketType, isSportsbookLineSource } from "@/lib/odds";
 import type { OddsDebugState } from "@/lib/theOddsFanDuel";
 import type { RundownDebugState } from "@/lib/theRundown";
 
@@ -70,14 +70,14 @@ export default function BetBuilderPage() {
   }, [loadSlip]);
 
   const forGame = useMemo(() => (data?.allMarkets ?? []).filter((m) => m.gameId === gameId), [data, gameId]);
-  const currentGame = useMemo(() => (data?.games ?? []).find((g) => g.id === gameId), [data?.games, gameId]);
+  const sportsbookForGame = useMemo(() => forGame.filter((m) => isSportsbookLineSource(m.source)), [forGame]);
   const lineMarkets = useMemo(
-    () => forGame.filter((m) => !isLegibleSportsbookPlayerProp(m, currentGame)),
-    [forGame, currentGame]
+    () => sportsbookForGame.filter((m) => !isPlayerPropMarketType(m.marketType)),
+    [sportsbookForGame]
   );
   const playerMarkets = useMemo(
-    () => forGame.filter((m) => isLegibleSportsbookPlayerProp(m, currentGame)),
-    [forGame, currentGame]
+    () => sportsbookForGame.filter((m) => isPlayerPropMarketType(m.marketType)),
+    [sportsbookForGame]
   );
   const oddsDebug = data?.oddsDebug;
 
