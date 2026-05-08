@@ -132,14 +132,14 @@ export function filterLegiblePlayerPropsForSlate(markets: Market[], games: GameC
   });
 }
 
-/** Default 24h — keeps The Odds API request volume low (override with ODDS_CACHE_SECONDS). */
-const DEFAULT_ODDS_CACHE_SEC = 86_400;
+/** Default 60s for near-real-time board updates (override with ODDS_CACHE_SECONDS). */
+const DEFAULT_ODDS_CACHE_SEC = 60;
 
-/** Next.js `fetch` revalidate for Odds API responses (seconds). Min 300, max 7d. */
+/** Next.js `fetch` revalidate for Odds API responses (seconds). Min 15, max 7d. */
 export function oddsApiRevalidateSeconds(): number {
   const raw = process.env.ODDS_CACHE_SECONDS ?? process.env.ODDS_REVALIDATE_SECONDS;
   if (raw == null || String(raw).trim() === "") return DEFAULT_ODDS_CACHE_SEC;
   const n = Number(raw);
-  if (!Number.isFinite(n) || n < 300) return 300;
+  if (!Number.isFinite(n) || n < 15) return 15;
   return Math.min(Math.floor(n), 86_400 * 7);
 }

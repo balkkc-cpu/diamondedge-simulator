@@ -53,7 +53,7 @@ export default function BetBuilderPage() {
   }, [loadDashboard]);
 
   useEffect(() => {
-    const t = window.setInterval(loadDashboard, 3_600_000);
+    const t = window.setInterval(loadDashboard, 60_000);
     return () => window.clearInterval(t);
   }, [loadDashboard]);
 
@@ -229,7 +229,8 @@ export default function BetBuilderPage() {
               <PlayerTabsBoard markets={playerMarkets} onAdd={addBet} />
             ) : (
               <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-3 text-sm text-amber-200">
-                No sportsbook player props are available from your current provider/key. Showing game lines instead.
+                Live sportsbook player props are temporarily unavailable from the current feed (for example, provider rate-limit). No synthetic
+                fallback props are shown.
               </div>
             )}
           </div>
@@ -241,7 +242,8 @@ export default function BetBuilderPage() {
               <PlayerPropColumns markets={playerMarkets} onAdd={addBet} />
             ) : (
               <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-3 text-sm text-amber-200">
-                No sportsbook player props are available from your current provider/key. Showing game lines instead.
+                Live sportsbook player props are temporarily unavailable from the current feed (for example, provider rate-limit). No synthetic
+                fallback props are shown.
               </div>
             )}
           </div>

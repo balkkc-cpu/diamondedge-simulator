@@ -116,11 +116,11 @@ function uniqueSorted(nums: number[]): number[] {
 
 /**
  * Next.js `fetch` revalidate for The Rundown HTTP calls (seconds).
- * Default 15 minutes to avoid upstream HTTP 429 bursts; override with RUNDOWN_FETCH_REVALIDATE_SECONDS.
+ * Default 60s for near-real-time board updates; override with RUNDOWN_FETCH_REVALIDATE_SECONDS.
  */
 export function rundownHttpRevalidateSeconds(): number {
   const raw = process.env.RUNDOWN_FETCH_REVALIDATE_SECONDS ?? process.env.RUNDOWN_REVALIDATE_SECONDS;
-  if (raw == null || String(raw).trim() === "") return 900;
+  if (raw == null || String(raw).trim() === "") return 60;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 60) return 60;
   return Math.min(Math.floor(n), 86_400 * 7);
@@ -190,7 +190,7 @@ export async function buildRundownMarketIdsForFetch(params: {
   catalogHttpStatus: number;
 }> {
   const discover = String(process.env.RUNDOWN_DISCOVER_PROP_MARKET_IDS ?? "true").toLowerCase() !== "false";
-  const maxIds = Math.min(80, Math.max(12, Number(process.env.RUNDOWN_MAX_MARKET_IDS ?? "72") || 72));
+  const maxIds = Math.min(120, Math.max(16, Number(process.env.RUNDOWN_MAX_MARKET_IDS ?? "96") || 96));
 
   const envBase = process.env.RUNDOWN_MARKET_IDS?.trim();
   const baseIds = uniqueSorted(parseIdList(envBase && envBase.length > 0 ? envBase : "1,2,3"));
