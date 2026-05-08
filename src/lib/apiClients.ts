@@ -143,6 +143,10 @@ function playerPropDedupeKey(m: Market): string {
   return `${m.gameId}|${m.statKey ?? ""}|${normPropDedupePart(m.playerName ?? "")}|${m.line ?? "x"}|${playerPropSideKeyFromSelection(m.selection)}`;
 }
 
+function marketDedupeKey(m: Market): string {
+  return `${m.gameId}|${m.marketType}|${normPropDedupePart(m.selection)}|${m.line ?? "x"}|${normPropDedupePart(m.playerName ?? "")}`;
+}
+
 /** One row per leg; prefer major US books when the same prop is listed at multiple books. */
 function dedupeOddsApiPlayerPropsPreferFanDuel(rows: Market[]): Market[] {
   const pref = ["fanduel", "draftkings", "betmgm", "espnbet", "caesars", "fanatics"];
@@ -218,6 +222,14 @@ async function buildOddsApiFailoverBoard(games: GameCard[]): Promise<Market[]> {
   const apiPlayer = buildPlayerPropsFromOddsEvents(events, games);
   const sportsbook = [...priced, ...apiPlayer].filter((m) => isSportsbookLineSource(m.source));
   return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(sportsbook), games);
+}
+
+/** Merge whole-slate boards; keep primary rows when both feeds carry same leg key. */
+function mergeBoardsPreferPrimary(primary: Market[], secondary: Market[]): Market[] {
+  const byKey = new Map<string, Market>();
+  for (const m of secondary) byKey.set(marketDedupeKey(m), m);
+  for (const m of primary) byKey.set(marketDedupeKey(m), m);
+  return [...byKey.values()];
 }
 
 function baselineBookAmericanForProp(m: Market): number | null {
@@ -384,13 +396,14 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
   const provider = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
   if (provider === "rundown") {
     const rundown = await fetchRundownMarketsForToday(games);
+    const failover = await buildOddsApiFailoverBoard(games);
     if (!rundown.length) {
-      const failover = await buildOddsApiFailoverBoard(games);
       return failover.filter((m) => m.gameId === gameId);
     }
     const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
     const retail = await mergeRundownRetailPlayerProps(applyRundownRetailSlate(sportsbook), games);
-    return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(retail), games).filter((m) => m.gameId === gameId);
+    const primary = filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(retail), games);
+    return mergeBoardsPreferPrimary(primary, failover).filter((m) => m.gameId === gameId);
   }
   const game = games.find((g) => g.id === gameId);
   if (!game) return mockMarkets.filter((m) => m.gameId === gameId);
@@ -414,14 +427,16 @@ export async function getAllMarkets(): Promise<Market[]> {
   if (provider === "rundown") {
     const games = await getDailySchedule();
     const rundown = await fetchRundownMarketsForToday(games);
+    const failover = await buildOddsApiFailoverBoard(games);
     if (!rundown.length) {
-      return buildOddsApiFailoverBoard(games);
+      return failover;
     }
     const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
-    return filterLegiblePlayerPropsForSlate(
+    const primary = filterLegiblePlayerPropsForSlate(
       filterOutNonBookPlayerProps(await mergeRundownRetailPlayerProps(applyRundownRetailSlate(sportsbook), games)),
       games
     );
+    return mergeBoardsPreferPrimary(primary, failover);
   }
 
   const games = await getDailySchedule();
