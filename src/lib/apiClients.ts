@@ -139,12 +139,16 @@ function playerPropSideKeyFromSelection(selection: string): string {
   return "x";
 }
 
+function playerPropDedupeKey(m: Market): string {
+  return `${m.gameId}|${m.statKey ?? ""}|${normPropDedupePart(m.playerName ?? "")}|${m.line ?? "x"}|${playerPropSideKeyFromSelection(m.selection)}`;
+}
+
 /** One row per leg; prefer major US books when the same prop is listed at multiple books. */
 function dedupeOddsApiPlayerPropsPreferFanDuel(rows: Market[]): Market[] {
   const pref = ["fanduel", "draftkings", "betmgm", "espnbet", "caesars", "fanatics"];
   const byKey = new Map<string, Market[]>();
   for (const m of rows) {
-    const k = `${m.gameId}|${m.statKey ?? ""}|${normPropDedupePart(m.playerName ?? "")}|${m.line ?? "x"}|${playerPropSideKeyFromSelection(m.selection)}`;
+    const k = playerPropDedupeKey(m);
     if (!byKey.has(k)) byKey.set(k, []);
     byKey.get(k)!.push(m);
   }
@@ -160,19 +164,18 @@ function dedupeOddsApiPlayerPropsPreferFanDuel(rows: Market[]): Market[] {
   return out;
 }
 
-/** Rundown retail slate: game lines stay; player props from Odds API when available, else Rundown rows re-shaped into the same Odds layout (no extra Odds billing). */
-async function mergeRundownRetailPlayerProps(retail: Market[], games: GameCard[]): Promise<Market[]> {
-  const gameLines = retail.filter((m) => !isPlayerPropMarketType(m.marketType));
-  const rundownPlayerRaw = retail.filter((m) => isPlayerPropMarketType(m.marketType));
-  const useOddsProps = !!process.env.ODDS_API_KEY?.trim();
-  if (useOddsProps) {
-    const events = await fetchMlbOddsEvents();
-    if (events.length) {
-      const api = dedupeOddsApiPlayerPropsPreferFanDuel(buildPlayerPropsFromOddsEvents(events, games));
-      return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps([...gameLines, ...api]), games);
-    }
-  }
+/**
+ * Same prop offered on both feeds: keep The Odds API row (major-book prices); Rundown fills gaps for free.
+ */
+function mergePlayerPropLegsPreferOddsApi(apiLegs: Market[], rundownLegs: Market[]): Market[] {
+  const byKey = new Map<string, Market>();
+  for (const m of rundownLegs) byKey.set(playerPropDedupeKey(m), m);
+  for (const m of apiLegs) byKey.set(playerPropDedupeKey(m), m);
+  return [...byKey.values()];
+}
 
+/** Always build Rundown player legs (roster + synthetic Odds layout); never skip when an Odds API key exists. */
+async function buildRundownBackedPlayerLegs(rundownPlayerRaw: Market[], games: GameCard[]): Promise<Market[]> {
   const rosterFiltered = await filterRundownMislabeledPlayerProps(rundownPlayerRaw, games);
   const adaptable = rundownPlayerRaw.filter((m) => {
     const g = games.find((x) => x.id === m.gameId);
@@ -185,7 +188,23 @@ async function mergeRundownRetailPlayerProps(retail: Market[], games: GameCard[]
     synthetic.length > 0
       ? dedupeOddsApiPlayerPropsPreferFanDuel(buildPlayerPropsFromOddsEvents(synthetic, games))
       : [];
-  const playerLegs = fromOddsLayout.length ? fromOddsLayout : rosterFiltered;
+  return fromOddsLayout.length ? fromOddsLayout : rosterFiltered;
+}
+
+/** Rundown slate: game lines stay; player props = Rundown (free) unified with Odds API props when the key returns events — API prices win on duplicates, Rundown keeps coverage. */
+async function mergeRundownRetailPlayerProps(retail: Market[], games: GameCard[]): Promise<Market[]> {
+  const gameLines = retail.filter((m) => !isPlayerPropMarketType(m.marketType));
+  const rundownPlayerRaw = retail.filter((m) => isPlayerPropMarketType(m.marketType));
+
+  const rundownLegs = await buildRundownBackedPlayerLegs(rundownPlayerRaw, games);
+
+  const oddsApiConfigured = !!process.env.ODDS_API_KEY?.trim();
+  const events = oddsApiConfigured ? await fetchMlbOddsEvents() : [];
+  const apiLegs =
+    events.length > 0 ? dedupeOddsApiPlayerPropsPreferFanDuel(buildPlayerPropsFromOddsEvents(events, games)) : [];
+
+  const playerLegs = mergePlayerPropLegsPreferOddsApi(apiLegs, rundownLegs);
+
   return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps([...gameLines, ...playerLegs]), games);
 }
 

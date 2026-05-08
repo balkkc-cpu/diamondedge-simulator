@@ -78,6 +78,26 @@ export function isLegibleSportsbookPlayerProp(
   game: Pick<GameCard, "homeTeam" | "awayTeam"> | null | undefined
 ): boolean {
   if (!isPlayerPropMarketType(m.marketType) || !isSportsbookLineSource(m.source)) return false;
+
+  /** Shaped `player_*` rows from The Rundown affiliate feed (already normalized in ingest). */
+  const rundownShaped =
+    /^rundown:/i.test(String(m.source)) &&
+    Boolean(m.statKey) &&
+    /^player_/i.test(String(m.marketType));
+  if (rundownShaped) {
+    const tail = tailAfterPlayerDot(m.selection);
+    const tailOk =
+      Boolean(tail) &&
+      ((/\bover\b|\bunder\b/.test(tail) && /\d/.test(tail)) || /\(yes\)|\(no\)/.test(tail) || /\d\s*\+\s/.test(tail));
+    const pn = normTeamOrPlayerLabel(String(m.playerName ?? ""));
+    if (tailOk && pn.split(/\s+/).filter(Boolean).length >= 2) {
+      if (!game) return true;
+      const ht = normTeamOrPlayerLabel(game.homeTeam);
+      const at = normTeamOrPlayerLabel(game.awayTeam);
+      return pn !== ht && pn !== at;
+    }
+  }
+
   const low = m.selection.toLowerCase();
   const tail = tailAfterPlayerDot(m.selection);
   if (m.selection.includes(" · ")) {
