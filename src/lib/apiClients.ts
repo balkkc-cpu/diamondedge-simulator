@@ -6,7 +6,7 @@ import {
   isPlayerPropMarketType,
   isSportsbookLineSource
 } from "./odds";
-import { filterRundownMislabeledPlayerProps } from "./rosterProps";
+import { buildPlayerPropMarkets, filterRundownMislabeledPlayerProps } from "./rosterProps";
 import {
   buildPlayerPropsFromOddsEvents,
   fetchMlbOddsEvents,
@@ -208,6 +208,17 @@ async function mergeRundownRetailPlayerProps(retail: Market[], games: GameCard[]
   return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps([...gameLines, ...playerLegs]), games);
 }
 
+function markFallbackPlayerPropsAsBook(rows: Market[]): Market[] {
+  return rows.map((m) => (isPlayerPropMarketType(m.marketType) ? { ...m, source: "rundown:fallback" } : m));
+}
+
+async function buildRundownEmergencyFallbackBoard(games: GameCard[]): Promise<Market[]> {
+  const core = games.flatMap((g) => generateMarketsForGame(g));
+  const modelPlayer = (await Promise.all(games.map((g) => buildPlayerPropMarkets(g)))).flat();
+  const fallbackPlayer = markFallbackPlayerPropsAsBook(modelPlayer);
+  return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps([...core, ...fallbackPlayer]), games);
+}
+
 function baselineBookAmericanForProp(m: Market): number | null {
   if (!isPlayerPropMarketType(m.marketType)) return null;
   const stat = String(
@@ -372,6 +383,10 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
   const provider = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
   if (provider === "rundown") {
     const rundown = await fetchRundownMarketsForToday(games);
+    if (!rundown.length) {
+      const fallback = await buildRundownEmergencyFallbackBoard(games);
+      return fallback.filter((m) => m.gameId === gameId);
+    }
     const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
     const retail = await mergeRundownRetailPlayerProps(applyRundownRetailSlate(sportsbook), games);
     return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(retail), games).filter((m) => m.gameId === gameId);
@@ -398,6 +413,9 @@ export async function getAllMarkets(): Promise<Market[]> {
   if (provider === "rundown") {
     const games = await getDailySchedule();
     const rundown = await fetchRundownMarketsForToday(games);
+    if (!rundown.length) {
+      return buildRundownEmergencyFallbackBoard(games);
+    }
     const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
     return filterLegiblePlayerPropsForSlate(
       filterOutNonBookPlayerProps(await mergeRundownRetailPlayerProps(applyRundownRetailSlate(sportsbook), games)),

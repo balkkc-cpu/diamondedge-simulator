@@ -80,14 +80,6 @@ export default function BetBuilderPage() {
     [forGame, currentGame]
   );
   const oddsDebug = data?.oddsDebug;
-  const noPlayerProps = playerMarkets.length === 0;
-
-  useEffect(() => {
-    if (!noPlayerProps) return;
-    if (marketFilter === "players_tabs" || marketFilter === "players_columns") {
-      setMarketFilter("all");
-    }
-  }, [noPlayerProps, marketFilter]);
 
   const oddsBadge = useMemo(() => {
     if (!oddsDebug) return null;
