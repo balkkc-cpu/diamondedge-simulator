@@ -208,6 +208,18 @@ async function mergeRundownRetailPlayerProps(retail: Market[], games: GameCard[]
   return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps([...gameLines, ...playerLegs]), games);
 }
 
+/** Real-odds failover when Rundown is unavailable/rate-limited: use The Odds API event feed only. */
+async function buildOddsApiFailoverBoard(games: GameCard[]): Promise<Market[]> {
+  if (!games.length) return [];
+  const events = await fetchMlbOddsEvents();
+  if (!events.length) return [];
+  const core = games.flatMap((g) => generateMarketsForGame(g));
+  const priced = mergeFanDuelPrices([...core], games, events);
+  const apiPlayer = buildPlayerPropsFromOddsEvents(events, games);
+  const sportsbook = [...priced, ...apiPlayer].filter((m) => isSportsbookLineSource(m.source));
+  return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(sportsbook), games);
+}
+
 function baselineBookAmericanForProp(m: Market): number | null {
   if (!isPlayerPropMarketType(m.marketType)) return null;
   const stat = String(
@@ -372,6 +384,10 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
   const provider = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
   if (provider === "rundown") {
     const rundown = await fetchRundownMarketsForToday(games);
+    if (!rundown.length) {
+      const failover = await buildOddsApiFailoverBoard(games);
+      return failover.filter((m) => m.gameId === gameId);
+    }
     const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
     const retail = await mergeRundownRetailPlayerProps(applyRundownRetailSlate(sportsbook), games);
     return filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(retail), games).filter((m) => m.gameId === gameId);
@@ -398,6 +414,9 @@ export async function getAllMarkets(): Promise<Market[]> {
   if (provider === "rundown") {
     const games = await getDailySchedule();
     const rundown = await fetchRundownMarketsForToday(games);
+    if (!rundown.length) {
+      return buildOddsApiFailoverBoard(games);
+    }
     const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
     return filterLegiblePlayerPropsForSlate(
       filterOutNonBookPlayerProps(await mergeRundownRetailPlayerProps(applyRundownRetailSlate(sportsbook), games)),
