@@ -38,6 +38,13 @@ type ParlayReport = {
   }>;
 };
 
+const COACH_PERSONA =
+  "You are Diamond Edge Coach, an elite pro-bettor voice: direct, disciplined, probability-first, never hype. Use only live sportsbook odds + simulation context from this app.";
+
+function coachWrap(answer: string): string {
+  return `${COACH_PERSONA}\n\n${answer}`;
+}
+
 let lastGoodSportsbookProps: { at: number; markets: Market[] } | null = null;
 const LAST_GOOD_PROPS_TTL_MS = 1000 * 60 * 60 * 6;
 
@@ -292,7 +299,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as CoachReq;
     const question = String(body.question ?? "").trim();
     const payload = body.payload ?? {};
-    if (!question) return NextResponse.json({ answer: "Ask a question and I will break it down from your slip and current markets." });
+    if (!question) return NextResponse.json({ answer: coachWrap("Ask a question and I will break it down from your slip and current markets.") });
 
     const q = question.toLowerCase();
     const rows = payload.results ?? [];
@@ -301,7 +308,9 @@ export async function POST(req: NextRequest) {
       const safest = [...rows].sort((a, b) => b.hitProbability - a.hitProbability)[0];
       if (safest) {
         return NextResponse.json({
-          answer: `Safest leg profile in this run is ${safest.betId} at ${(safest.hitProbability * 100).toFixed(1)}% hit rate with ${safest.suggestedUnits}u suggested size.`
+          answer: coachWrap(
+            `Safest leg profile in this run is ${safest.betId} at ${(safest.hitProbability * 100).toFixed(1)}% hit rate with ${safest.suggestedUnits}u suggested size.`
+          )
         });
       }
     }
@@ -309,7 +318,9 @@ export async function POST(req: NextRequest) {
     if (q.includes("parlay") && (q.includes("chance") || q.includes("hit") || q.includes("prob"))) {
       const p = Number(payload.parlayHitProbability ?? 0);
       return NextResponse.json({
-        answer: `Your current full-ticket parlay hit estimate is ${(p * 100).toFixed(2)}%. If you want safer construction, trim the lowest hit-rate leg first.`
+        answer: coachWrap(
+          `Your current full-ticket parlay hit estimate is ${(p * 100).toFixed(2)}%. If you want safer construction, trim the lowest hit-rate leg first.`
+        )
       });
     }
 
@@ -318,9 +329,10 @@ export async function POST(req: NextRequest) {
       const p = Number(manualBet.oddsAmerican);
       const show = p > 0 ? `+${p}` : `${p}`;
       return NextResponse.json({
-        answer:
+        answer: coachWrap(
           `Using your manual in-app override for this leg: ${manualBet.selection} at ${show}. ` +
-          `Per your setting, coach prioritizes your manually edited odds for that selection.`,
+            `Per your setting, coach prioritizes your manually edited odds for that selection.`
+        ),
         sources: ["manual-override"]
       });
     }
@@ -355,9 +367,10 @@ export async function POST(req: NextRequest) {
         const provider = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
         const dbg = provider === "rundown" ? getRundownDebugState() : getOddsDebugState();
         return NextResponse.json({
-          answer:
+          answer: coachWrap(
             `I could not build a ${legs}-leg parlay from real sportsbook odds right now. ` +
-            `Available sportsbook/manual player-prop pool: ${propPool.length}. Feed state: ${dbg.status}.`,
+              `Available sportsbook/manual player-prop pool: ${propPool.length}. Feed state: ${dbg.status}.`
+          ),
           sources: ["parlay-generator", `odds-debug:${dbg.status}`]
         });
       }
@@ -386,7 +399,7 @@ export async function POST(req: NextRequest) {
       }
       if (!best) {
         return NextResponse.json({
-          answer: "I could not generate a valid random parlay sample this run. Try again and I will regenerate."
+          answer: coachWrap("I could not generate a valid random parlay sample this run. Try again and I will regenerate.")
         });
       }
       const sourceLabel = (sportsbookPlayerPool.length || sportsbookAnyPool.length >= legs)
@@ -403,9 +416,10 @@ export async function POST(req: NextRequest) {
           : "manual-player-pool";
       const modeLabel = isAutoSuggestAsk(q) ? "auto-suggest-mode" : "random-command-mode";
       return NextResponse.json({
-        answer:
+        answer: coachWrap(
           `${isAutoSuggestAsk(q) ? "Auto-suggested parlay (no player input required):\n" : ""}` +
-          formatParlayReport(best.sim, best.picks),
+            formatParlayReport(best.sim, best.picks)
+        ),
         parlayReport: buildParlayReport(best.sim, best.picks),
         sources: ["the-odds-api:fanduel,draftkings", "sim-engine", sourceLabel, poolLabel, modeLabel]
       });
@@ -417,9 +431,10 @@ export async function POST(req: NextRequest) {
       const oddsLines = top.map((m) => `- ${fmtLine(m)}`).join("\n");
       const who = top[0]?.playerName ?? "that player";
       return NextResponse.json({
-        answer:
+        answer: coachWrap(
           `Live props currently available for ${who} (all props found from sportsbook feed):\n${oddsLines}\n` +
-          `Ask for a random parlay any time and I will generate/simulate one from current live props.`,
+            `Ask for a random parlay any time and I will generate/simulate one from current live props.`
+        ),
         sources: [
           "the-odds-api:fanduel,draftkings",
           usingCachedReal ? "last-good-live-sportsbook-snapshot" : "live-sportsbook-feed"
@@ -439,9 +454,10 @@ export async function POST(req: NextRequest) {
     if (ranked.length) {
       const oddsLines = ranked.map((m) => `- ${fmtLine(m)}`).join("\n");
       return NextResponse.json({
-        answer:
+        answer: coachWrap(
           `Here are current matching real-time sportsbook lines (FanDuel/DraftKings feed):\n${oddsLines}\n` +
-          `Coach used live sportsbook odds first, and only falls back to manual app odds when you override a leg.`,
+            `Coach used live sportsbook odds first, and only falls back to manual app odds when you override a leg.`
+        ),
         sources: [
           "the-odds-api:fanduel,draftkings",
           usingCachedReal ? "last-good-live-sportsbook-snapshot" : "live-sportsbook-feed"
@@ -452,9 +468,10 @@ export async function POST(req: NextRequest) {
     const webSummary = await duckDuckGoSummary(question);
     if (webSummary) {
       return NextResponse.json({
-        answer:
+        answer: coachWrap(
           `${webSummary}\n\nI did not find a direct matching live prop line for that exact query right now. ` +
-          `For odds, I only trust live sportsbook feeds (or your manual override when you edit a leg).`,
+            `For odds, I only trust live sportsbook feeds (or your manual override when you edit a leg).`
+        ),
         sources: ["duckduckgo-instant-answer", "live-sportsbook-required"]
       });
     }
@@ -463,9 +480,10 @@ export async function POST(req: NextRequest) {
     if (snapshot.length) {
       const oddsLines = snapshot.map((m) => `- ${fmtLine(m)}`).join("\n");
       return NextResponse.json({
-        answer:
+        answer: coachWrap(
           `I could not map that to one exact player/prop, so here is a live odds snapshot you can use right now:\n${oddsLines}\n` +
-          `If you give player + stat (example: 'Mookie Betts total bases'), I will narrow it instantly.`,
+            `If you give player + stat (example: 'Mookie Betts total bases'), I will narrow it instantly.`
+        ),
         sources: [
           usingCachedReal ? "last-good-live-sportsbook-snapshot" : "live-sportsbook-feed",
           "broad-odds-snapshot"
@@ -495,9 +513,10 @@ export async function POST(req: NextRequest) {
       }
       if (best) {
         return NextResponse.json({
-          answer:
+          answer: coachWrap(
             `I auto-generated a best-available parlay since exact text matching was weak:\n` +
-            `${formatParlayReport(best.sim, best.picks)}`,
+              `${formatParlayReport(best.sim, best.picks)}`
+          ),
           parlayReport: buildParlayReport(best.sim, best.picks),
           sources: ["auto-fallback-parlay", `odds-debug:${dbg.status}`]
         });
@@ -507,22 +526,25 @@ export async function POST(req: NextRequest) {
     if (slipSnapshot.length) {
       const lines = slipSnapshot.slice(0, 10).map((m) => `- ${fmtLine(m)}`).join("\n");
       return NextResponse.json({
-        answer:
+        answer: coachWrap(
           `I could not map exact phrasing, but here are all currently available odds from your active slip:\n${lines}\n` +
-          `Add at least 2 player props in your slip and I will auto-generate a simulated parlay immediately.`,
+            `Add at least 2 player props in your slip and I will auto-generate a simulated parlay immediately.`
+        ),
         sources: ["active-slip-snapshot", `odds-debug:${dbg.status}`]
       });
     }
     return NextResponse.json({
-      answer:
-        "No exact player/prop match was found from this phrasing. Try player + stat (example: 'Juan Soto total bases odds today') or ask for a random parlay command and I will generate one instantly.",
+      answer: coachWrap(
+        "No exact player/prop match was found from this phrasing. Try player + stat (example: 'Juan Soto total bases odds today') or ask for a random parlay command and I will generate one instantly."
+      ),
       sources: [`odds-debug:${dbg.status}`]
     });
   } catch (e) {
     return NextResponse.json({
-      answer:
+      answer: coachWrap(
         `Coach hit an internal error (${e instanceof Error ? e.message : String(e)}). ` +
-        `I still recommend re-running your request; endpoint is designed to recover on the next call.`
+          `I still recommend re-running your request; endpoint is designed to recover on the next call.`
+      )
     });
   }
 }
