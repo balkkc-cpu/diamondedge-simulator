@@ -326,7 +326,10 @@ function questionMentionsBet(question: string, bet: SlipBet): boolean {
 
 async function fetchLiveSportsbookMarkets(): Promise<Market[]> {
   const board = await getAllMarkets();
-  return board.filter((m) => isSportsbookLineSource(m.source));
+  const book = board.filter((m) => isSportsbookLineSource(m.source));
+  if (book.length) return book;
+  /** Rundown 429 / no key: still run coach + parlays off model/mock board (simulation-only). */
+  return board.filter((m) => m.source === "model" || m.source === "mock");
 }
 
 function toMarketFromSlipBet(b: SlipBet): Market {
@@ -465,8 +468,9 @@ export async function POST(req: NextRequest) {
     }
 
     const liveMarkets = await fetchLiveSportsbookMarkets();
-    if (liveMarkets.length) {
-      lastGoodSportsbookProps = { at: Date.now(), markets: liveMarkets };
+    const bookOnlyLive = liveMarkets.filter((m) => isSportsbookLineSource(m.source));
+    if (bookOnlyLive.length) {
+      lastGoodSportsbookProps = { at: Date.now(), markets: bookOnlyLive };
     }
     const cacheValid =
       !!lastGoodSportsbookProps && Date.now() - lastGoodSportsbookProps.at < LAST_GOOD_PROPS_TTL_MS;
@@ -484,7 +488,7 @@ export async function POST(req: NextRequest) {
       const sportsbookPlayerPool = uniqueById(markets.filter((m) => isPlayerPropMarketType(m.marketType))).slice(0, 240);
       const sportsbookAnyPool = uniqueById(markets).slice(0, 260);
       const slipPlayerPool = uniqueById((payload.bets ?? []).map(toMarketFromSlipBet).filter((m) => isPlayerPropMarketType(m.marketType)));
-      // Strict odds policy: sportsbook live feed first, user manual overrides second; no model pool fallback.
+      // Sportsbook feed first; when empty (Rundown 429 / no keys), markets include model/mock so coach still works.
       const propPool = sportsbookPlayerPool.length
         ? sportsbookPlayerPool
         : sportsbookAnyPool.length >= legs
@@ -543,13 +547,16 @@ export async function POST(req: NextRequest) {
         });
       }
       rememberCoachParlay(ip, best.picks.map((p) => p.id));
-      const sourceLabel = (sportsbookPlayerPool.length || sportsbookAnyPool.length >= legs)
-        ? usingCachedReal
-          ? "last-good-live-sportsbook-snapshot"
-          : "live-sportsbook-feed"
-        : slipPlayerPool.length
-          ? "manual-slip-player-fallback"
-          : "no-real-odds-available";
+      const usedSimBoard = !markets.some((m) => isSportsbookLineSource(m.source));
+      const sourceLabel = usedSimBoard
+        ? "simulator-model-board"
+        : sportsbookPlayerPool.length || sportsbookAnyPool.length >= legs
+          ? usingCachedReal
+            ? "last-good-live-sportsbook-snapshot"
+            : "live-sportsbook-feed"
+          : slipPlayerPool.length
+            ? "manual-slip-player-fallback"
+            : "no-real-odds-available";
       const poolLabel = sportsbookPlayerPool.length
         ? "player-prop-pool"
         : sportsbookAnyPool.length >= legs

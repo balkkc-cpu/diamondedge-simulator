@@ -188,6 +188,25 @@ export function filterLegiblePlayerPropsForSlate(markets: Market[], games: GameC
   });
 }
 
+/**
+ * Player-prop pool for parlay/coach generators: legible sportsbook props first,
+ * then model/mock props when feeds are empty or rate-limited (simulation-only).
+ */
+export function playerPropPoolForGenerators(markets: Market[], games: GameCard[]): Market[] {
+  const book = filterLegiblePlayerPropsForSlate(
+    markets.filter((m) => isPlayerPropMarketType(m.marketType) && isSportsbookLineSource(m.source)),
+    games
+  );
+  if (book.length) return book;
+  return markets.filter(
+    (m) =>
+      isPlayerPropMarketType(m.marketType) &&
+      (m.source === "model" || m.source === "mock") &&
+      Number.isFinite(m.american) &&
+      String(m.selection ?? "").length > 4
+  );
+}
+
 /** Default 60s for near-real-time board updates (override with ODDS_CACHE_SECONDS). */
 const DEFAULT_ODDS_CACHE_SEC = 60;
 

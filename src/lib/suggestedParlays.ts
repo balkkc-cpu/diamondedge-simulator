@@ -1,4 +1,5 @@
-import { filterLegiblePlayerPropsForSlate, isPlayerPropMarketType, isSportsbookLineSource } from "@/lib/odds";
+import { isPlayerPropMarketType, playerPropPoolForGenerators } from "@/lib/odds";
+import { mockMarkets } from "@/lib/mockData";
 import { createSeededRng, hashSeed, rotateTake, shuffleInPlace } from "@/lib/parlaySampling";
 import { runSimulation1000 } from "@/lib/simEngine";
 import { explainLeg } from "@/lib/simExplain";
@@ -257,10 +258,10 @@ export async function buildSuggestedParlaysFromBoard(input: {
   const parlayLegs = input.parlayLegs ?? 3;
   const diversitySeed = input.diversitySeed ?? hashSeed([String(Date.now()), String(Math.random())]);
 
-  const board = filterLegiblePlayerPropsForSlate(
-    input.markets.filter((m) => isPlayerPropMarketType(m.marketType) && isSportsbookLineSource(m.source)),
-    input.games
-  );
+  let board = playerPropPoolForGenerators(input.markets, input.games);
+  if (!board.length) {
+    board = mockMarkets.filter((m) => isPlayerPropMarketType(m.marketType));
+  }
   if (!board.length) return [];
 
   const shuffledBoard = shuffleInPlace([...board], createSeededRng(hashSeed(["board-shuf", String(diversitySeed)])));

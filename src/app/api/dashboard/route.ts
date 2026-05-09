@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAllMarkets, getDailySchedule, getInjuries, getWeatherFallback } from "@/lib/apiClients";
+import { mockGames } from "@/lib/mockData";
 import { isPlayerPropMarketType, isSportsbookLineSource } from "@/lib/odds";
 import { getOddsDebugState } from "@/lib/theOddsFanDuel";
 import { getRundownDebugState } from "@/lib/theRundown";
@@ -10,7 +11,8 @@ export async function GET(req: Request) {
   const rl = rateLimit(`dashboard:${ip}`, 120, 60_000);
   if (!rl.allowed) return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
 
-  const games = await getDailySchedule();
+  let games = await getDailySchedule();
+  if (!games.length) games = mockGames;
   const [allMarkets, injuries, weather] = await Promise.all([
     getAllMarkets(),
     getInjuries(),

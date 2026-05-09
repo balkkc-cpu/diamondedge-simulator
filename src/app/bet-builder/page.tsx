@@ -84,10 +84,11 @@ export default function BetBuilderPage() {
     if (fromBook.length) return fromBook;
     return forGame.filter((m) => m.source === "model" && !isPlayerPropMarketType(m.marketType));
   }, [forGame, sportsbookForGame]);
-  const playerMarkets = useMemo(
-    () => sportsbookForGame.filter((m) => isPlayerPropMarketType(m.marketType)),
-    [sportsbookForGame]
-  );
+  const playerMarkets = useMemo(() => {
+    const fromBook = sportsbookForGame.filter((m) => isPlayerPropMarketType(m.marketType));
+    if (fromBook.length) return fromBook;
+    return forGame.filter((m) => isPlayerPropMarketType(m.marketType) && m.source === "model");
+  }, [forGame, sportsbookForGame]);
   const usingModelGameLines = useMemo(() => {
     const bookGameLines = sportsbookForGame.filter((m) => !isPlayerPropMarketType(m.marketType));
     return bookGameLines.length === 0 && lineMarkets.length > 0;
