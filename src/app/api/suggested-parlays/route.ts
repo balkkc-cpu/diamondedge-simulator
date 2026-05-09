@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { rateLimit } from "@/lib/rateLimit";
-import { getAllMarkets, getDailySchedule } from "@/lib/apiClients";
+import { getAllMarkets, getDailyScheduleSport } from "@/lib/apiClients";
 import { buildSuggestedParlaysFromBoard } from "@/lib/suggestedParlays";
+import { parseSportCode, type SportCode } from "@/lib/sportContext";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,9 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const legsRaw = Number(searchParams.get("legs") ?? "3");
   const legs = (legsRaw === 2 || legsRaw === 3 || legsRaw === 4 ? legsRaw : 3) as 2 | 3 | 4;
+  const sport: SportCode = parseSportCode(searchParams.get("sport"));
 
-  const [games, markets] = await Promise.all([getDailySchedule(), getAllMarkets()]);
+  const [games, markets] = await Promise.all([getDailyScheduleSport(sport), getAllMarkets(sport)]);
   const parlays = await buildSuggestedParlaysFromBoard({
     games,
     markets,

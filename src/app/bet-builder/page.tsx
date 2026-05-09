@@ -6,6 +6,7 @@ import { GameLinesRow, PlayerPropColumns } from "@/components/PlayerPropColumns"
 import { PlayerTabsBoard } from "@/components/PlayerTabsBoard";
 import { useBetStore } from "@/store/betStore";
 import { GameCard, Market, SlipBet } from "@/lib/types";
+import { displayNameForSport, parseSportCode, type SportCode } from "@/lib/sportContext";
 import { isPlayerPropMarketType, isSportsbookLineSource } from "@/lib/odds";
 import type { OddsDebugState } from "@/lib/theOddsFanDuel";
 import type { RundownDebugState } from "@/lib/theRundown";
@@ -22,6 +23,7 @@ export default function BetBuilderPage() {
   }
 
   const [data, setData] = useState<{
+    sport?: SportCode;
     games: GameCard[];
     allMarkets: Market[];
     oddsProvider?: "rundown" | "the_odds_api";
@@ -41,7 +43,9 @@ export default function BetBuilderPage() {
   const { bets, addBet, loadSlip } = useBetStore();
 
   const loadDashboard = useCallback(() => {
-    fetch("/api/dashboard")
+    const sport =
+      typeof window !== "undefined" ? parseSportCode(new URLSearchParams(window.location.search).get("sport")) : "mlb";
+    fetch(`/api/dashboard?sport=${sport}`)
       .then((r) => r.json())
       .then((payload) => {
         setData(payload);
@@ -202,7 +206,21 @@ export default function BetBuilderPage() {
       <section className="panel overflow-hidden p-4 lg:p-5">
         <div className="mb-4 flex flex-col gap-2 border-b border-slate-700/50 pb-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-xl font-bold tracking-tight text-sky-300">Bet board</h2>
+            <h2 className="text-xl font-bold tracking-tight text-sky-300">
+              Bet board
+              {data?.sport ? (
+                <span className="ml-2 text-base font-semibold text-slate-400">· {displayNameForSport(data.sport)}</span>
+              ) : null}
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">
+              <a className="text-sky-400 underline" href="/bet-builder">
+                MLB slate
+              </a>
+              {" · "}
+              <a className="text-sky-400 underline" href="/bet-builder?sport=nba">
+                NBA slate
+              </a>
+            </p>
             <p className="mt-1 max-w-2xl text-sm text-slate-400">
               Player board defaults to per-player tabs; switch to stat columns if you prefer. With{" "}
               <code className="text-slate-300">ODDS_PROVIDER=rundown</code>, player props use The Rundown feed re-shaped into

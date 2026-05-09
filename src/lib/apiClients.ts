@@ -1,4 +1,6 @@
-import { mockGameDetails, mockGames, mockMarkets } from "./mockData";
+import { fetchNbaGamesForDateEt } from "./nbaSchedule";
+import { mockGameDetails, mockGames, mockMarkets, mockNbaGames, mockNbaMarkets } from "./mockData";
+import { oddsApiKeyForSport, oddsProviderForSport, slateDateStringEt, type SportCode } from "./sportContext";
 import {
   filterLegiblePlayerPropsForSlate,
   filterOutNonBookPlayerProps,
@@ -9,7 +11,7 @@ import {
 import { buildPlayerPropMarkets, filterRundownMislabeledPlayerProps } from "./rosterProps";
 import {
   buildPlayerPropsFromOddsEvents,
-  fetchMlbOddsEvents,
+  fetchOddsEvents,
   isRundownMarketAdaptableToOddsLayout,
   mergeFanDuelPrices,
   rundownMarketsToSyntheticOddsEvents
@@ -31,13 +33,7 @@ function allowSimRosterPlayerProps(): boolean {
 
 /** MLB slate day should follow US Eastern time, not UTC day rollover. */
 export function mlbDateStringEt(now = new Date()): string {
-  const dtf = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  });
-  return dtf.format(now);
+  return slateDateStringEt(now);
 }
 
 /** MLB Stats `gameDate` is UTC with `Z` when zone included; normalize so server parse isn't ambiguous. */
@@ -141,6 +137,78 @@ function generateMarketsForGame(game: GameCard): Market[] {
   ];
 }
 
+function generateMarketsForSport(sport: SportCode, game: GameCard): Market[] {
+  if (sport === "mlb") return generateMarketsForGame(game);
+  const seed = gameSeed(game.id);
+  const homeEdge = (seed % 11) - 5;
+  const baseHomeMl = -112 + homeEdge * 3;
+  const baseAwayMl = 102 - homeEdge * 3;
+  const total = 218 + (seed % 6) * 0.5;
+  const spread = 6.5 + (seed % 3) * 0.5;
+  const ttLine = Math.round((total / 2) * 2) / 2;
+  const fmtSpread = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+  return [
+    { id: `${game.id}-ml-home`, gameId: game.id, marketType: "moneyline", selection: game.homeTeam, line: null, american: baseHomeMl, source: "model" },
+    { id: `${game.id}-ml-away`, gameId: game.id, marketType: "moneyline", selection: game.awayTeam, line: null, american: baseAwayMl, source: "model" },
+    {
+      id: `${game.id}-rl-home`,
+      gameId: game.id,
+      marketType: "runline",
+      selection: `${game.homeTeam} -${fmtSpread(spread)}`,
+      line: -spread,
+      american: -110,
+      source: "model"
+    },
+    {
+      id: `${game.id}-rl-away`,
+      gameId: game.id,
+      marketType: "runline",
+      selection: `${game.awayTeam} +${fmtSpread(spread)}`,
+      line: spread,
+      american: -110,
+      source: "model"
+    },
+    { id: `${game.id}-tot-over`, gameId: game.id, marketType: "total", selection: `Over ${total.toFixed(1)}`, line: total, american: -108, source: "model" },
+    { id: `${game.id}-tot-under`, gameId: game.id, marketType: "total", selection: `Under ${total.toFixed(1)}`, line: total, american: -112, source: "model" },
+    {
+      id: `${game.id}-tt-h`,
+      gameId: game.id,
+      marketType: "team_total",
+      selection: `${game.homeTeam} Over ${ttLine.toFixed(1)}`,
+      line: ttLine,
+      american: -110,
+      source: "model"
+    },
+    {
+      id: `${game.id}-tt-a`,
+      gameId: game.id,
+      marketType: "team_total",
+      selection: `${game.awayTeam} Over ${ttLine.toFixed(1)}`,
+      line: ttLine,
+      american: -110,
+      source: "model"
+    },
+    {
+      id: `${game.id}-f5-h`,
+      gameId: game.id,
+      marketType: "first5",
+      selection: `${game.homeTeam} · First half moneyline`,
+      line: null,
+      american: -102,
+      source: "model"
+    },
+    {
+      id: `${game.id}-f5-a`,
+      gameId: game.id,
+      marketType: "first5",
+      selection: `${game.awayTeam} · First half moneyline`,
+      line: null,
+      american: -102,
+      source: "model"
+    }
+  ];
+}
+
 function clampAmerican(n: number): number {
   const v = Math.round(n);
   return Math.max(-450, Math.min(450, v));
@@ -171,7 +239,12 @@ function marketDedupeKey(m: Market): string {
  * Attach roster-backed `model` props when a game has no/few sportsbook player lines
  * (feed gaps, event↔game ID mismatch). Dedupes by prop key so book rows always win.
  */
-async function augmentRosterPlayerPropsWhereMissing(games: GameCard[], board: Market[]): Promise<Market[]> {
+async function augmentRosterPlayerPropsWhereMissing(
+  games: GameCard[],
+  board: Market[],
+  sport: SportCode = "mlb"
+): Promise<Market[]> {
+  if (sport === "nba") return board;
   if (!allowSimRosterPlayerProps()) return board;
 
   const existingPropKeys = new Set(
@@ -250,7 +323,11 @@ function mergePlayerPropLegsPreferOddsApi(apiLegs: Market[], rundownLegs: Market
 }
 
 /** Always build Rundown player legs (roster + synthetic Odds layout); never skip when an Odds API key exists. */
-async function buildRundownBackedPlayerLegs(rundownPlayerRaw: Market[], games: GameCard[]): Promise<Market[]> {
+async function buildRundownBackedPlayerLegs(
+  rundownPlayerRaw: Market[],
+  games: GameCard[],
+  sport: SportCode
+): Promise<Market[]> {
   const rosterFiltered = await filterRundownMislabeledPlayerProps(rundownPlayerRaw, games);
   const adaptable = rundownPlayerRaw.filter((m) => {
     const g = games.find((x) => x.id === m.gameId);
@@ -258,7 +335,7 @@ async function buildRundownBackedPlayerLegs(rundownPlayerRaw: Market[], games: G
   });
   const byId = new Map<string, Market>();
   for (const m of [...adaptable, ...rosterFiltered]) byId.set(m.id, m);
-  const synthetic = rundownMarketsToSyntheticOddsEvents([...byId.values()], games);
+  const synthetic = rundownMarketsToSyntheticOddsEvents([...byId.values()], games, sport);
   const fromOddsLayout =
     synthetic.length > 0
       ? dedupeOddsApiPlayerPropsPreferFanDuel(buildPlayerPropsFromOddsEvents(synthetic, games))
@@ -267,14 +344,18 @@ async function buildRundownBackedPlayerLegs(rundownPlayerRaw: Market[], games: G
 }
 
 /** Rundown slate: game lines stay; player props = Rundown (free) unified with Odds API props when the key returns events — API prices win on duplicates, Rundown keeps coverage. */
-async function mergeRundownRetailPlayerProps(retail: Market[], games: GameCard[]): Promise<Market[]> {
+async function mergeRundownRetailPlayerProps(
+  retail: Market[],
+  games: GameCard[],
+  sport: SportCode
+): Promise<Market[]> {
   const gameLines = retail.filter((m) => !isPlayerPropMarketType(m.marketType));
   const rundownPlayerRaw = retail.filter((m) => isPlayerPropMarketType(m.marketType));
 
-  const rundownLegs = await buildRundownBackedPlayerLegs(rundownPlayerRaw, games);
+  const rundownLegs = await buildRundownBackedPlayerLegs(rundownPlayerRaw, games, sport);
 
-  const oddsApiConfigured = !!process.env.ODDS_API_KEY?.trim();
-  const events = oddsApiConfigured ? await fetchMlbOddsEvents() : [];
+  const oddsApiConfigured = !!oddsApiKeyForSport(sport);
+  const events = oddsApiConfigured ? await fetchOddsEvents(sport) : [];
   const apiLegs =
     events.length > 0 ? dedupeOddsApiPlayerPropsPreferFanDuel(buildPlayerPropsFromOddsEvents(events, games)) : [];
 
@@ -284,11 +365,11 @@ async function mergeRundownRetailPlayerProps(retail: Market[], games: GameCard[]
 }
 
 /** Real-odds failover when Rundown is unavailable/rate-limited: use The Odds API event feed only. */
-async function buildOddsApiFailoverBoard(games: GameCard[]): Promise<Market[]> {
+async function buildOddsApiFailoverBoard(games: GameCard[], sport: SportCode): Promise<Market[]> {
   if (!games.length) return [];
-  const events = await fetchMlbOddsEvents();
+  const events = await fetchOddsEvents(sport);
   if (!events.length) return [];
-  const core = games.flatMap((g) => generateMarketsForGame(g));
+  const core = games.flatMap((g) => generateMarketsForSport(sport, g));
   const priced = mergeFanDuelPrices([...core], games, events);
   const apiPlayer = buildPlayerPropsFromOddsEvents(events, games);
   const combined = [...priced, ...apiPlayer];
@@ -304,14 +385,14 @@ function mergeBoardsPreferPrimary(primary: Market[], secondary: Market[]): Marke
 }
 
 /** Simulated markets per game (ML, RL, total, etc.); used when retail feeds are empty so the UI never has zero rows. */
-function modelSlateBaseline(games: GameCard[]): Market[] {
+function modelSlateBaseline(games: GameCard[], sport: SportCode): Market[] {
   if (!games.length) return [];
-  return games.flatMap((g) => generateMarketsForGame(g));
+  return games.flatMap((g) => generateMarketsForSport(sport, g));
 }
 
 /** Book-priced rows win on key clash; model baseline fills missing legs (Rundown path). */
-function mergeFeedsOverModelBaseline(feedRows: Market[], games: GameCard[]): Market[] {
-  return mergeBoardsPreferPrimary(feedRows, modelSlateBaseline(games));
+function mergeFeedsOverModelBaseline(feedRows: Market[], games: GameCard[], sport: SportCode): Market[] {
+  return mergeBoardsPreferPrimary(feedRows, modelSlateBaseline(games, sport));
 }
 
 function baselineBookAmericanForProp(m: Market): number | null {
@@ -440,7 +521,15 @@ function calibrateModelPlayerPropsFromLiveLines(markets: Market[]): Market[] {
   });
 }
 
-export async function getDailySchedule(): Promise<GameCard[]> {
+export async function getDailyScheduleSport(sport: SportCode): Promise<GameCard[]> {
+  if (sport === "nba") {
+    try {
+      const rows = await fetchNbaGamesForDateEt(slateDateStringEt());
+      return rows.length ? rows : mockNbaGames;
+    } catch {
+      return mockNbaGames;
+    }
+  }
   try {
     const today = mlbDateStringEt();
     const data = await scheduleJson(`${MLB_STATS_API}/schedule?sportId=1&date=${today}&hydrate=team,probablePitcher`);
@@ -478,25 +567,31 @@ export async function getDailySchedule(): Promise<GameCard[]> {
   }
 }
 
-export async function getOddsMarkets(gameId: string): Promise<Market[]> {
-  const all = await getAllMarkets();
+export async function getDailySchedule(): Promise<GameCard[]> {
+  return getDailyScheduleSport("mlb");
+}
+
+export async function getOddsMarkets(gameId: string, sport: SportCode = "mlb"): Promise<Market[]> {
+  const all = await getAllMarkets(sport);
   return all.filter((m) => m.gameId === gameId);
 }
 
-export async function getAllMarkets(): Promise<Market[]> {
-  const provider = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
+export async function getAllMarkets(sport: SportCode = "mlb"): Promise<Market[]> {
+  const mockGamesFor = sport === "nba" ? mockNbaGames : mockGames;
+  const mockMarketsFor = sport === "nba" ? mockNbaMarkets : mockMarkets;
+  const provider = oddsProviderForSport(sport);
   if (provider === "rundown") {
-    const gamesRaw = await getDailySchedule();
-    const games = gamesRaw.length ? gamesRaw : mockGames;
-    const rundown = await fetchRundownMarketsForToday(games);
-    const failover = await buildOddsApiFailoverBoard(games);
+    const gamesRaw = await getDailyScheduleSport(sport);
+    const games = gamesRaw.length ? gamesRaw : mockGamesFor;
+    const rundown = await fetchRundownMarketsForToday(games, sport);
+    const failover = await buildOddsApiFailoverBoard(games, sport);
     if (!rundown.length) {
       const rundownDbg = getRundownDebugState();
-      const withBaseline = mergeFeedsOverModelBaseline(failover, games);
-      const filled = await augmentRosterPlayerPropsWhereMissing(games, withBaseline);
+      const withBaseline = mergeFeedsOverModelBaseline(failover, games, sport);
+      const filled = await augmentRosterPlayerPropsWhereMissing(games, withBaseline, sport);
       const out = filterLegiblePlayerPropsForSlate(filled, games);
       if (
-        process.env.ODDS_API_KEY?.trim() &&
+        oddsApiKeyForSport(sport) &&
         (rundownDbg.status === "http_error" || rundownDbg.status === "no_events") &&
         out.some((m) => isPlayerPropMarketType(m.marketType) && isSportsbookLineSource(m.source))
       ) {
@@ -509,24 +604,24 @@ export async function getAllMarkets(): Promise<Market[]> {
     }
     const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
     const primary = filterLegiblePlayerPropsForSlate(
-      filterOutNonBookPlayerProps(await mergeRundownRetailPlayerProps(applyRundownRetailSlate(sportsbook), games)),
+      filterOutNonBookPlayerProps(await mergeRundownRetailPlayerProps(applyRundownRetailSlate(sportsbook), games, sport)),
       games
     );
     const bookMerged = mergeBoardsPreferPrimary(primary, failover);
-    const merged = mergeFeedsOverModelBaseline(bookMerged, games);
-    const filled = await augmentRosterPlayerPropsWhereMissing(games, merged);
+    const merged = mergeFeedsOverModelBaseline(bookMerged, games, sport);
+    const filled = await augmentRosterPlayerPropsWhereMissing(games, merged, sport);
     return filterLegiblePlayerPropsForSlate(filled, games);
   }
 
-  const games = await getDailySchedule();
+  const games = await getDailyScheduleSport(sport);
   if (!games.length) {
-    const filled = await augmentRosterPlayerPropsWhereMissing(mockGames, mockMarkets);
-    return filterLegiblePlayerPropsForSlate(filled, mockGames);
+    const filled = await augmentRosterPlayerPropsWhereMissing(mockGamesFor, mockMarketsFor, sport);
+    return filterLegiblePlayerPropsForSlate(filled, mockGamesFor);
   }
-  const core = games.flatMap((g) => generateMarketsForGame(g));
-  const useOddsProps = !!process.env.ODDS_API_KEY?.trim();
+  const core = games.flatMap((g) => generateMarketsForSport(sport, g));
+  const useOddsProps = !!oddsApiKeyForSport(sport);
   const merged = [...core];
-  const events = await fetchMlbOddsEvents();
+  const events = await fetchOddsEvents(sport);
   const priced = mergeFanDuelPrices(merged, games, events);
   if (useOddsProps && events.length > 0) {
     const apiPlayer = buildPlayerPropsFromOddsEvents(events, games);
@@ -534,11 +629,11 @@ export async function getAllMarkets(): Promise<Market[]> {
     // Keep model game lines when mergeFanDuelPrices could not attach a book row for that game/side;
     // only strip non-book *player* props via filterOutNonBookPlayerProps (same as no-API path).
     const base = filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(out), games);
-    const filled = await augmentRosterPlayerPropsWhereMissing(games, base);
+    const filled = await augmentRosterPlayerPropsWhereMissing(games, base, sport);
     return filterLegiblePlayerPropsForSlate(filled, games);
   }
   const base = filterLegiblePlayerPropsForSlate(filterOutNonBookPlayerProps(calibrateModelPlayerPropsFromLiveLines(priced)), games);
-  const filled = await augmentRosterPlayerPropsWhereMissing(games, base);
+  const filled = await augmentRosterPlayerPropsWhereMissing(games, base, sport);
   return filterLegiblePlayerPropsForSlate(filled, games);
 }
 
@@ -548,12 +643,21 @@ export async function getWeatherFallback() {
   return { summary: "API-ready weather adapter configured" };
 }
 
-export async function getInjuries(): Promise<{ playerName: string; status: string; note?: string }[]> {
+export async function getInjuriesSport(sport: SportCode): Promise<{ playerName: string; status: string; note?: string }[]> {
+  if (sport === "nba") {
+    return [
+      {
+        playerName: "NBA injury scan",
+        status: "Not wired to 40-man style feed",
+        note: "MLB uses 40-man roster status; add an NBA injury provider for the same depth here."
+      }
+    ];
+  }
   if (process.env.SPORTSDATAIO_API_KEY) {
     return [{ playerName: "SportsDataIO feed", status: "Connected", note: "Using configured premium injury feed." }];
   }
 
-  const games = await getDailySchedule();
+  const games = await getDailyScheduleSport("mlb");
   const teamIds = new Set<number>();
   for (const g of games) {
     if (g.homeTeamId) teamIds.add(g.homeTeamId);
@@ -608,7 +712,31 @@ export async function getInjuries(): Promise<{ playerName: string; status: strin
   return out.slice(0, 48);
 }
 
-export async function getGameDetail(gameId: string): Promise<GameDetail> {
+export async function getInjuries(): Promise<{ playerName: string; status: string; note?: string }[]> {
+  return getInjuriesSport("mlb");
+}
+
+async function nbaGameDetailFromSchedule(gameId: string): Promise<GameDetail | null> {
+  const games = await getDailyScheduleSport("nba");
+  const g = games.find((x) => x.id === gameId);
+  if (!g) return null;
+  return {
+    gameId: g.id,
+    matchup: `${g.awayTeam} at ${g.homeTeam}`,
+    venue: g.ballpark ?? "Arena",
+    weather: g.weather ?? "Indoor",
+    trends: ["Pace and matchup model active", "Rest and travel context considered", "Minutes distribution factors in"],
+    injuries: ["Check NBA.com official injury report for latest game-day status."],
+    starters: [`${g.homeTeam}: Starters TBD`, `${g.awayTeam}: Starters TBD`],
+    projectedLineups: {
+      [g.homeTeam]: ["Lineup pending"],
+      [g.awayTeam]: ["Lineup pending"]
+    },
+    playersToWatch: []
+  };
+}
+
+async function fetchMlbGameDetailFromStats(gameId: string): Promise<GameDetail> {
   try {
     const feed = await safeJson(`${MLB_STATS_API_V11}/game/${gameId}/feed/live`);
     const gameData = feed.gameData ?? {};
@@ -652,7 +780,7 @@ export async function getGameDetail(gameId: string): Promise<GameDetail> {
         `${away} away split model active`,
         "Bullpen usage + recent-form factor included"
       ],
-      injuries: await getInjuries().then((i) => i.map((x) => `${x.playerName}: ${x.status}`)),
+      injuries: await getInjuriesSport("mlb").then((i) => i.map((x) => `${x.playerName}: ${x.status}`)),
       starters: [`${home}: ${probableHome}`, `${away}: ${probableAway}`],
       projectedLineups: {
         [home]: homeLineup.length ? homeLineup : ["Lineup pending"],
@@ -675,4 +803,29 @@ export async function getGameDetail(gameId: string): Promise<GameDetail> {
       }
     );
   }
+}
+
+export async function getGameDetailSport(sport: SportCode, gameId: string): Promise<GameDetail> {
+  if (sport === "nba") {
+    const nba = await nbaGameDetailFromSchedule(gameId);
+    if (nba) return nba;
+    return (
+      mockGameDetails[gameId] ?? {
+        gameId,
+        matchup: "Matchup pending",
+        venue: "Venue pending",
+        weather: "Indoor",
+        trends: ["No trend data available yet"],
+        injuries: ["No injury rows wired for this game id"],
+        starters: ["Starters pending"],
+        projectedLineups: {},
+        playersToWatch: []
+      }
+    );
+  }
+  return fetchMlbGameDetailFromStats(gameId);
+}
+
+export async function getGameDetail(gameId: string): Promise<GameDetail> {
+  return getGameDetailSport("mlb", gameId);
 }

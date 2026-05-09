@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useState } from "react";
 import type { SuggestedParlayCard } from "@/lib/suggestedParlays";
+import type { SportCode } from "@/lib/sportContext";
 
 type ParlayLegs = 2 | 3 | 4;
 
@@ -79,7 +80,12 @@ function fmtEdgeSigned(edge: number) {
   return edge >= 0 ? `+${v}%` : `${v}%`;
 }
 
-export function DashboardSuggestedParlays(props: { parlays: SuggestedParlayCard[]; initialLegs?: ParlayLegs }) {
+export function DashboardSuggestedParlays(props: {
+  parlays: SuggestedParlayCard[];
+  initialLegs?: ParlayLegs;
+  sport?: SportCode;
+}) {
+  const sport = props.sport ?? "mlb";
   const initialLegs = props.initialLegs ?? 3;
   const [legs, setLegs] = useState<ParlayLegs>(initialLegs);
   const [parlays, setParlays] = useState<SuggestedParlayCard[]>(props.parlays ?? []);
@@ -87,13 +93,13 @@ export function DashboardSuggestedParlays(props: { parlays: SuggestedParlayCard[
 
   useEffect(() => {
     setParlays(props.parlays ?? []);
-  }, [props.parlays]);
+  }, [props.parlays, sport]);
 
   async function refresh(nextLegs: ParlayLegs) {
     setLegs(nextLegs);
     setLoading(true);
     try {
-      const res = await fetch(`/api/suggested-parlays?legs=${nextLegs}&_=${Date.now()}`, {
+      const res = await fetch(`/api/suggested-parlays?sport=${sport}&legs=${nextLegs}&_=${Date.now()}`, {
         method: "GET",
         cache: "no-store"
       });

@@ -5,6 +5,7 @@
  */
 
 import { isPlayerPropMarketType, oddsApiRevalidateSeconds } from "./odds";
+import { oddsApiKeyForSport, type SportCode } from "./sportContext";
 import { GameCard, Market } from "./types";
 import { HITTER_MATRIX, PITCHER_MATRIX, type PickKind, type StatKey } from "./playerPropCatalog";
 
@@ -70,7 +71,44 @@ const MLB_NICKNAMES_DESC = [
   "athletics"
 ];
 
-/** Map Odds API / common abbreviations to the same key as full MLB.com names. */
+/** NBA city + nickname endings for Odds API ↔ schedule name matching. */
+const NBA_NICKNAMES_DESC = [
+  "trail blazers",
+  "timberwolves",
+  "76ers",
+  "sixers",
+  "warriors",
+  "lakers",
+  "celtics",
+  "bucks",
+  "nuggets",
+  "suns",
+  "heat",
+  "knicks",
+  "nets",
+  "bulls",
+  "cavaliers",
+  "mavericks",
+  "rockets",
+  "spurs",
+  "grizzlies",
+  "pelicans",
+  "thunder",
+  "jazz",
+  "kings",
+  "clippers",
+  "raptors",
+  "hawks",
+  "hornets",
+  "magic",
+  "wizards",
+  "pistons",
+  "pacers"
+];
+
+const LEAGUE_TEAM_NICKNAMES = [...MLB_NICKNAMES_DESC, ...NBA_NICKNAMES_DESC];
+
+/** Map Odds API / common abbreviations to the same key as full league team names. */
 export function teamKey(s: string): string {
   const n = normTeam(s)
     .replace(/d[\s-]?backs/g, "diamondbacks")
@@ -79,7 +117,7 @@ export function teamKey(s: string): string {
     .replace(/\bchi cubs\b/g, "cubs")
     .replace(/'/g, "'");
   if (/athletic|^a s$|^as$/.test(n)) return "athletics";
-  for (const nick of MLB_NICKNAMES_DESC) {
+  for (const nick of LEAGUE_TEAM_NICKNAMES) {
     if (n === nick || n.endsWith(" " + nick)) return nick;
   }
   const parts = n.split(" ").filter(Boolean);
@@ -197,8 +235,24 @@ const PLAYER_PROP_API_KEYS = new Set([
   "batter_hits_runs_rbis_alternate",
   "pitcher_strikeouts",
   "pitcher_strikeouts_alternate",
-  "batter_walks"
-  ,"batter_walks_alternate"
+  "batter_walks",
+  "batter_walks_alternate",
+  "player_points",
+  "player_points_alternate",
+  "player_rebounds",
+  "player_rebounds_alternate",
+  "player_assists",
+  "player_assists_alternate",
+  "player_threes",
+  "player_threes_alternate",
+  "player_blocks",
+  "player_blocks_alternate",
+  "player_steals",
+  "player_steals_alternate",
+  "player_turnovers",
+  "player_turnovers_alternate",
+  "player_points_rebounds_assists",
+  "player_points_rebounds_assists_alternate"
 ]);
 
 const API_KEY_TO_STAT: Record<string, StatKey | undefined> = {
@@ -217,7 +271,21 @@ const API_KEY_TO_STAT: Record<string, StatKey | undefined> = {
   pitcher_strikeouts: "k",
   pitcher_strikeouts_alternate: "k",
   batter_walks: "walks",
-  batter_walks_alternate: "walks"
+  batter_walks_alternate: "walks",
+  player_points: "points",
+  player_points_alternate: "points",
+  player_rebounds: "rebounds",
+  player_rebounds_alternate: "rebounds",
+  player_assists: "assists",
+  player_assists_alternate: "assists",
+  player_threes: "threes",
+  player_threes_alternate: "threes",
+  player_blocks: "blocks",
+  player_blocks_alternate: "blocks",
+  player_steals: "steals",
+  player_steals_alternate: "steals",
+  player_points_rebounds_assists: "pra",
+  player_points_rebounds_assists_alternate: "pra"
 };
 
 function apiKeyToStat(apiKey: string): StatKey | undefined {
@@ -232,11 +300,20 @@ function apiKeyToStat(apiKey: string): StatKey | undefined {
   if (k.includes("rbis")) return "rbi";
   if (k.includes("walk")) return "walks";
   if (k.includes("batter_hits")) return "hits";
+  if (k.includes("points_rebounds_assists")) return "pra";
+  if (k.includes("player_points")) return "points";
+  if (k.includes("player_rebounds")) return "rebounds";
+  if (k.includes("player_assists")) return "assists";
+  if (k.includes("threes") || k.includes("three")) return "threes";
+  if (k.includes("player_blocks")) return "blocks";
+  if (k.includes("player_steals")) return "steals";
   return undefined;
 }
 
 function statLabel(stat: StatKey): string {
-  return stat === "k" ? PITCHER_MATRIX.k.label : HITTER_MATRIX[stat as Exclude<StatKey, "k">].label;
+  if (stat === "k") return PITCHER_MATRIX.k.label;
+  const row = HITTER_MATRIX[stat as Exclude<StatKey, "k">];
+  return row?.label ?? String(stat);
 }
 
 /** Build player prop markets straight from Odds API (all listed books) — avoids roster line mismatch. */
@@ -308,7 +385,14 @@ const STAT_TO_ODDS_MARKET: Record<StatKey, string> = {
   hrr: "batter_hits_runs_rbis",
   hr: "batter_home_runs",
   walks: "batter_walks",
-  k: "pitcher_strikeouts"
+  k: "pitcher_strikeouts",
+  points: "player_points",
+  rebounds: "player_rebounds",
+  assists: "player_assists",
+  threes: "player_threes",
+  pra: "player_points_rebounds_assists",
+  blocks: "player_blocks",
+  steals: "player_steals"
 };
 
 function statKeyToOddsMarketKey(stat: StatKey): string {
@@ -363,7 +447,11 @@ function parseRundownRowToOddsOutcome(m: Market): OddsOutcome | null {
  * Re-shape Rundown `Market[]` into synthetic Odds API event objects so {@link buildPlayerPropsFromOddsEvents}
  * can build the same `player_*` rows without billing The Odds API (Rundown key only).
  */
-export function rundownMarketsToSyntheticOddsEvents(markets: Market[], games: GameCard[]): unknown[] {
+export function rundownMarketsToSyntheticOddsEvents(
+  markets: Market[],
+  games: GameCard[],
+  sport: SportCode = "mlb"
+): unknown[] {
   type Slot = { home_team: string; away_team: string; books: Map<string, Map<string, OddsOutcome[]>> };
   const byEvent = new Map<string, Slot>();
 
@@ -390,7 +478,7 @@ export function rundownMarketsToSyntheticOddsEvents(markets: Market[], games: Ga
     id,
     home_team: slot.home_team,
     away_team: slot.away_team,
-    sport_key: "baseball_mlb",
+    sport_key: sport === "nba" ? "basketball_nba" : "baseball_mlb",
     bookmakers: [...slot.books.entries()].map(([bk, mkMap]) => ({
       key: bk,
       markets: [...mkMap.entries()].map(([marketKey, outcomes]) => ({
@@ -418,9 +506,41 @@ const PLAYER_MARKETS =
   "batter_hits,batter_hits_alternate,batter_home_runs,batter_home_runs_alternate,batter_total_bases,batter_total_bases_alternate,batter_rbis,batter_rbis_alternate,batter_runs_scored,batter_runs_scored_alternate,batter_hits_runs_rbis,batter_hits_runs_rbis_alternate,pitcher_strikeouts,pitcher_strikeouts_alternate,batter_walks,batter_walks_alternate";
 
 const MLB_NONFEATURED_MARKETS_COMBINED = `${EXTENDED_CORE_MARKETS},${PLAYER_MARKETS}`;
+
+const NBA_PLAYER_MARKETS =
+  "player_points,player_points_alternate,player_rebounds,player_rebounds_alternate,player_assists,player_assists_alternate,player_threes,player_threes_alternate,player_blocks,player_blocks_alternate,player_steals,player_steals_alternate,player_turnovers,player_turnovers_alternate,player_points_rebounds_assists,player_points_rebounds_assists_alternate";
+const NBA_EXTENDED_CORE_MARKETS = "team_totals,alternate_team_totals";
+const NBA_NONFEATURED_MARKETS_COMBINED = `${NBA_EXTENDED_CORE_MARKETS},${NBA_PLAYER_MARKETS}`;
+
 const LAST_GOOD_TTL_MS = 1000 * 60 * 60 * 24; // 24h stale-while-provider-down (align with long cache)
-let lastGoodMlbEvents: { events: unknown[]; at: number } | null = null;
-let cachedMlbSportKey: { key: string; at: number } | null = null;
+const lastGoodOddsEvents: Partial<Record<SportCode, { events: unknown[]; at: number }>> = {};
+const cachedOddsSportKey: Partial<Record<SportCode, { key: string; at: number }>> = {};
+
+function nonFeaturedMarketsCombined(sport: SportCode): string {
+  return sport === "nba" ? NBA_NONFEATURED_MARKETS_COMBINED : MLB_NONFEATURED_MARKETS_COMBINED;
+}
+
+function playerMarketsForSport(sport: SportCode): string {
+  return sport === "nba" ? NBA_PLAYER_MARKETS : PLAYER_MARKETS;
+}
+
+function eventRecoveryMax(sport: SportCode): number {
+  const raw = sport === "nba" ? process.env.NBA_EVENT_RECOVERY_MAX : process.env.MLB_EVENT_RECOVERY_MAX;
+  const n = Number(raw ?? "8");
+  return Math.max(1, Math.min(Number.isFinite(n) ? n : 18, 40));
+}
+
+function eventOddsMax(sport: SportCode): number {
+  const raw = sport === "nba" ? process.env.NBA_EVENT_ODDS_MAX : process.env.MLB_EVENT_ODDS_MAX;
+  const n = Number(raw ?? "20");
+  return Math.max(1, Math.min(Number.isFinite(n) ? n : 20, 40));
+}
+
+function eventOddsConcurrency(sport: SportCode): number {
+  const raw = sport === "nba" ? process.env.NBA_EVENT_ODDS_CONCURRENCY : process.env.MLB_EVENT_ODDS_CONCURRENCY;
+  const n = Number(raw ?? "3");
+  return Math.max(1, Math.min(Number.isFinite(n) ? n : 6, 12));
+}
 
 /**
  * Bulk /baseball_mlb/odds only accepts featured markets. Player + alternate props are on
@@ -454,7 +574,12 @@ async function fetchSingleEventExtraOdds(
   }
 }
 
-async function fetchSingleEventMarketKeys(apiKey: string, sportKey: string, eventId: string): Promise<string[]> {
+async function fetchSingleEventMarketKeys(
+  apiKey: string,
+  sportKey: string,
+  eventId: string,
+  sport: SportCode
+): Promise<string[]> {
   const url =
     `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(sportKey)}/events/${encodeURIComponent(eventId)}/markets` +
     `?apiKey=${encodeURIComponent(apiKey)}&regions=${encodeURIComponent(EVENT_REGIONS)}`;
@@ -466,16 +591,19 @@ async function fetchSingleEventMarketKeys(apiKey: string, sportKey: string, even
     for (const m of bk.markets ?? []) {
       const k = String(m.key ?? "").trim().toLowerCase();
       if (!k) continue;
-      if (
+      const mlbish =
         k.startsWith("batter_") ||
         k.startsWith("pitcher_") ||
         k === "team_totals" ||
         k === "alternate_team_totals" ||
         k === "h2h_1st_5_innings" ||
-        k === "totals_1st_1_innings"
-      ) {
-        keys.add(k);
-      }
+        k === "totals_1st_1_innings";
+      const nbaish =
+        k.startsWith("player_") ||
+        k === "team_totals" ||
+        k === "alternate_team_totals" ||
+        k.includes("h2h_q");
+      if (sport === "nba" ? nbaish : mlbish) keys.add(k);
     }
   }
   return [...keys];
@@ -489,9 +617,13 @@ async function fetchEventListBase(apiKey: string, sportKey: string): Promise<Arr
   return Array.isArray(out) ? (out as Array<Record<string, unknown>>) : [];
 }
 
-async function resolveMlbSportKey(apiKey: string): Promise<string> {
-  if (cachedMlbSportKey && Date.now() - cachedMlbSportKey.at < oddsApiRevalidateSeconds() * 1000) return cachedMlbSportKey.key;
-  const fallback = "baseball_mlb";
+async function resolveOddsSportKey(apiKey: string, sport: SportCode): Promise<string> {
+  const slot = cachedOddsSportKey[sport];
+  if (slot && Date.now() - slot.at < oddsApiRevalidateSeconds() * 1000) return slot.key;
+  const fallback = sport === "nba" ? "basketball_nba" : "baseball_mlb";
+  const re = sport === "nba" ? /^basketball_nba($|_)/ : /^baseball_mlb($|_)/;
+  const fallbacks =
+    sport === "nba" ? [fallback, "basketball_nba_preseason"] : [fallback, "baseball_mlb_preseason", "baseball_mlb_postseason"];
   try {
     const res = await fetch(`https://api.the-odds-api.com/v4/sports?apiKey=${encodeURIComponent(apiKey)}`, {
       next: { revalidate: oddsApiRevalidateSeconds() }
@@ -501,27 +633,26 @@ async function resolveMlbSportKey(apiKey: string): Promise<string> {
     const keys = (sports ?? [])
       .filter((s) => s.active !== false)
       .map((s) => String(s.key ?? ""))
-      .filter((k) => /^baseball_mlb($|_)/.test(k));
-    const tryKeys = keys.length ? keys : [fallback, "baseball_mlb_preseason", "baseball_mlb_postseason"];
+      .filter((k) => re.test(k));
+    const tryKeys = keys.length ? keys : fallbacks;
     for (const k of tryKeys) {
       const ev = await fetchEventListBase(apiKey, k);
       if (ev.length) {
-        cachedMlbSportKey = { key: k, at: Date.now() };
+        cachedOddsSportKey[sport] = { key: k, at: Date.now() };
         return k;
       }
     }
-    cachedMlbSportKey = { key: fallback, at: Date.now() };
+    cachedOddsSportKey[sport] = { key: fallback, at: Date.now() };
     return fallback;
   } catch {
     return fallback;
   }
 }
 
-async function recoverEventsFromEventOddsEndpoint(apiKey: string, sportKey: string): Promise<unknown[]> {
+async function recoverEventsFromEventOddsEndpoint(apiKey: string, sportKey: string, sport: SportCode): Promise<unknown[]> {
   const base = await fetchEventListBase(apiKey, sportKey);
   if (!base.length) return [];
-  const maxRaw = Number(process.env.MLB_EVENT_RECOVERY_MAX ?? "8");
-  const maxEvents = Math.max(1, Math.min(Number.isFinite(maxRaw) ? maxRaw : 18, base.length));
+  const maxEvents = Math.max(1, Math.min(eventRecoveryMax(sport), base.length));
   const ids = base.slice(0, maxEvents);
 
   const out: unknown[] = [];
@@ -535,7 +666,7 @@ async function recoverEventsFromEventOddsEndpoint(apiKey: string, sportKey: stri
   return out;
 }
 
-async function recoverEventsFromUpcomingOdds(apiKey: string): Promise<unknown[]> {
+async function recoverEventsFromUpcomingOdds(apiKey: string, sport: SportCode): Promise<unknown[]> {
   const base =
     "https://api.the-odds-api.com/v4/sports/upcoming/odds" +
     `?apiKey=${encodeURIComponent(apiKey)}&regions=${encodeURIComponent(LIVE_REGIONS)}&oddsFormat=american&markets=${FEATURED_MARKETS}`;
@@ -543,20 +674,28 @@ async function recoverEventsFromUpcomingOdds(apiKey: string): Promise<unknown[]>
   if (!res.ok) return [];
   const out = (await res.json()) as Array<Record<string, unknown>>;
   if (!Array.isArray(out) || !out.length) return [];
-  return out.filter((e) => /^baseball_mlb($|_)/.test(String(e.sport_key ?? "")));
+  const re = sport === "nba" ? /^basketball_nba($|_)/ : /^baseball_mlb($|_)/;
+  return out.filter((e) => re.test(String(e.sport_key ?? "")));
 }
 
 /** Merge extras from event-odds into the featured bulk row for one game. */
-async function mergeNonFeaturedForOneEvent(apiKey: string, sportKey: string, ev: Record<string, unknown>): Promise<unknown> {
+async function mergeNonFeaturedForOneEvent(
+  apiKey: string,
+  sportKey: string,
+  ev: Record<string, unknown>,
+  sport: SportCode
+): Promise<unknown> {
   const id = String(ev.id ?? "").trim();
   if (!id) return ev;
 
+  const extMarkets = sport === "nba" ? NBA_EXTENDED_CORE_MARKETS : EXTENDED_CORE_MARKETS;
+
   for (const books of [true, false]) {
-    let detail = await fetchSingleEventExtraOdds(apiKey, sportKey, id, MLB_NONFEATURED_MARKETS_COMBINED, books);
+    let detail = await fetchSingleEventExtraOdds(apiKey, sportKey, id, nonFeaturedMarketsCombined(sport), books);
     if (detail) return mergeEventsById([[ev], [detail]])[0] ?? ev;
 
-    const ext = await fetchSingleEventExtraOdds(apiKey, sportKey, id, EXTENDED_CORE_MARKETS, books);
-    const pl = await fetchSingleEventExtraOdds(apiKey, sportKey, id, PLAYER_MARKETS, books);
+    const ext = await fetchSingleEventExtraOdds(apiKey, sportKey, id, extMarkets, books);
+    const pl = await fetchSingleEventExtraOdds(apiKey, sportKey, id, playerMarketsForSport(sport), books);
     const slices: unknown[] = [];
     if (ext) slices.push(ext);
     if (pl) slices.push(pl);
@@ -569,7 +708,7 @@ async function mergeNonFeaturedForOneEvent(apiKey: string, sportKey: string, ev:
     }
 
     // Final attempt: discover live market keys for this event/book and fetch exactly those.
-    const discovered = await fetchSingleEventMarketKeys(apiKey, sportKey, id);
+    const discovered = await fetchSingleEventMarketKeys(apiKey, sportKey, id, sport);
     if (discovered.length) {
       const joined = discovered.slice(0, 45).join(",");
       const dyn = await fetchSingleEventExtraOdds(apiKey, sportKey, id, joined, books);
@@ -580,12 +719,15 @@ async function mergeNonFeaturedForOneEvent(apiKey: string, sportKey: string, ev:
   return ev;
 }
 
-async function enrichMlbEventsWithPerEventOdds(apiKey: string, sportKey: string, events: unknown[]): Promise<unknown[]> {
+async function enrichOddsEventsWithPerEventOdds(
+  sport: SportCode,
+  apiKey: string,
+  sportKey: string,
+  events: unknown[]
+): Promise<unknown[]> {
   if (!events.length) return events;
-  const maxRaw = Number(process.env.MLB_EVENT_ODDS_MAX ?? "20");
-  const maxMerge = Math.max(1, Math.min(Number.isFinite(maxRaw) ? maxRaw : 20, events.length));
-  const concRaw = Number(process.env.MLB_EVENT_ODDS_CONCURRENCY ?? "3");
-  const concurrency = Math.max(1, Math.min(Number.isFinite(concRaw) ? concRaw : 6, maxMerge));
+  const maxMerge = Math.max(1, Math.min(eventOddsMax(sport), events.length));
+  const concurrency = Math.max(1, Math.min(eventOddsConcurrency(sport), maxMerge));
 
   const head = events.slice(0, maxMerge).map((e) => e as Record<string, unknown>);
   const tail = events.slice(maxMerge);
@@ -593,7 +735,7 @@ async function enrichMlbEventsWithPerEventOdds(apiKey: string, sportKey: string,
   const enriched: unknown[] = [];
   for (let i = 0; i < head.length; i += concurrency) {
     const batch = head.slice(i, i + concurrency);
-    const merged = await Promise.all(batch.map((ev) => mergeNonFeaturedForOneEvent(apiKey, sportKey, ev)));
+    const merged = await Promise.all(batch.map((ev) => mergeNonFeaturedForOneEvent(apiKey, sportKey, ev, sport)));
     enriched.push(...merged);
   }
   return enriched.length === events.length ? enriched : [...enriched, ...tail];
@@ -620,17 +762,17 @@ async function logOddsApiError(res: Response, tag: string): Promise<void> {
   );
 }
 
-export async function fetchMlbOddsEvents(): Promise<unknown[]> {
-  const key = process.env.ODDS_API_KEY;
+export async function fetchOddsEvents(sport: SportCode = "mlb"): Promise<unknown[]> {
+  const key = oddsApiKeyForSport(sport);
   if (!key) {
     setOddsDebug({
       status: "missing_key",
-      detail: "ODDS_API_KEY is not set"
+      detail: sport === "nba" ? "NBA_ODDS_API_KEY / ODDS_API_KEY is not set" : "ODDS_API_KEY is not set"
     });
-    console.warn("[odds-api] ODDS_API_KEY missing; using model prices.");
+    console.warn("[odds-api] odds API key missing; using model prices.");
     return [];
   }
-  const sportKey = await resolveMlbSportKey(key);
+  const sportKey = await resolveOddsSportKey(key, sport);
   const baseWithBooks =
     `https://api.the-odds-api.com/v4/sports/${encodeURIComponent(sportKey)}/odds` +
     `?apiKey=${encodeURIComponent(key)}&regions=${encodeURIComponent(LIVE_REGIONS)}&oddsFormat=american&bookmakers=fanduel,draftkings`;
@@ -718,23 +860,23 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
       return [];
     }
 
-    const upcomingRecovered = await recoverEventsFromUpcomingOdds(key).catch(() => []);
+    const upcomingRecovered = await recoverEventsFromUpcomingOdds(key, sport).catch(() => []);
     if (upcomingRecovered.length) {
-      const enriched = await enrichMlbEventsWithPerEventOdds(key, sportKey, upcomingRecovered);
+      const enriched = await enrichOddsEventsWithPerEventOdds(sport, key, sportKey, upcomingRecovered);
       if (enriched.length) {
-        lastGoodMlbEvents = { events: enriched, at: Date.now() };
+        lastGoodOddsEvents[sport] = { events: enriched, at: Date.now() };
         setOddsDebug({
           status: "ok",
-          detail: `recovered from /sports/upcoming/odds (${enriched.length} MLB events)`
+          detail: `recovered from /sports/upcoming/odds (${enriched.length} ${sport.toUpperCase()} events)`
         });
         return enriched;
       }
     }
 
-    const recovered = await recoverEventsFromEventOddsEndpoint(key, sportKey).catch(() => []);
+    const recovered = await recoverEventsFromEventOddsEndpoint(key, sportKey, sport).catch(() => []);
     if (recovered.length) {
-      const enriched = await enrichMlbEventsWithPerEventOdds(key, sportKey, recovered);
-      lastGoodMlbEvents = { events: enriched, at: Date.now() };
+      const enriched = await enrichOddsEventsWithPerEventOdds(sport, key, sportKey, recovered);
+      lastGoodOddsEvents[sport] = { events: enriched, at: Date.now() };
       setOddsDebug({
         status: "ok",
         detail: `recovered from /events/{id}/odds (${enriched.length} events)`
@@ -742,25 +884,30 @@ export async function fetchMlbOddsEvents(): Promise<unknown[]> {
       return enriched;
     }
 
-    if (lastGoodMlbEvents && Date.now() - lastGoodMlbEvents.at < LAST_GOOD_TTL_MS) {
+    const stale = lastGoodOddsEvents[sport];
+    if (stale && Date.now() - stale.at < LAST_GOOD_TTL_MS) {
       setOddsDebug({
         status: "ok",
-        detail: `provider empty; using cached board snapshot (${lastGoodMlbEvents.events.length} events)`
+        detail: `provider empty; using cached board snapshot (${stale.events.length} events)`
       });
-      return lastGoodMlbEvents.events;
+      return stale.events;
     }
 
     setOddsDebug({
       status: "no_events",
-      detail: "no MLB featured events from Odds API"
+      detail: sport === "nba" ? "no NBA featured events from Odds API" : "no MLB featured events from Odds API"
     });
-    console.warn("[odds-api] no MLB events returned; using model prices.");
+    console.warn(`[odds-api] no ${sport} events returned; using model prices.`);
     return [];
   }
 
-  const enriched = await enrichMlbEventsWithPerEventOdds(key, sportKey, events);
-  if (enriched.length) lastGoodMlbEvents = { events: enriched, at: Date.now() };
+  const enriched = await enrichOddsEventsWithPerEventOdds(sport, key, sportKey, events);
+  if (enriched.length) lastGoodOddsEvents[sport] = { events: enriched, at: Date.now() };
   return enriched;
+}
+
+export async function fetchMlbOddsEvents(): Promise<unknown[]> {
+  return fetchOddsEvents("mlb");
 }
 
 function marketList(ev: Record<string, unknown>): unknown[] {

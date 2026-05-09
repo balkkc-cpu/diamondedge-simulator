@@ -1,4 +1,5 @@
 import { isPlayerPropMarketType } from "./odds";
+import { rundownApiKeyForSport, rundownSportIdForSport, type SportCode } from "./sportContext";
 import { teamsMatchLoose } from "./theOddsFanDuel";
 import { HITTER_MATRIX, PITCHER_MATRIX, type PickKind, type StatKey } from "./playerPropCatalog";
 import { playerPropSelectionLooksStatBased } from "./rosterProps";
@@ -265,7 +266,8 @@ function tryLeadingPlayerFromPropMarketName(mkName: string): string | undefined 
 
 function statLabelFor(stat: StatKey): string {
   if (stat === "k") return PITCHER_MATRIX.k.label;
-  return HITTER_MATRIX[stat as Exclude<StatKey, "k">].label;
+  const row = HITTER_MATRIX[stat as Exclude<StatKey, "k">];
+  return row?.label ?? String(stat);
 }
 
 /**
@@ -514,16 +516,20 @@ async function fetchRundownEventsPage(
   }
 }
 
-export async function fetchRundownMarketsForToday(games: GameCard[] = []): Promise<Market[]> {
-  const key =
-    process.env.RUNDOWN_API_KEY?.trim() ||
-    process.env.THERUNDOWN_API_KEY?.trim();
+export async function fetchRundownMarketsForToday(games: GameCard[] = [], sport: SportCode = "mlb"): Promise<Market[]> {
+  const key = rundownApiKeyForSport(sport);
   if (!key) {
-    setRundownDebug({ status: "missing_key", detail: "RUNDOWN_API_KEY (or THERUNDOWN_API_KEY) missing" });
+    setRundownDebug({
+      status: "missing_key",
+      detail:
+        sport === "nba"
+          ? "NBA_RUNDOWN_API_KEY / RUNDOWN_API_KEY (or THERUNDOWN_API_KEY) missing"
+          : "RUNDOWN_API_KEY (or THERUNDOWN_API_KEY) missing"
+    });
     return [];
   }
 
-  const sportId = String(process.env.RUNDOWN_SPORT_ID ?? "3").trim();
+  const sportId = rundownSportIdForSport(sport);
   const date = process.env.RUNDOWN_DATE_OVERRIDE?.trim() || todayYmdEt();
   const offset = String(process.env.RUNDOWN_DATE_OFFSET_MINUTES ?? "300").trim();
   const affiliateIds = process.env.RUNDOWN_AFFILIATE_IDS?.trim();

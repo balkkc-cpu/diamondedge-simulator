@@ -127,6 +127,12 @@ function ouBaseline(stat: string, line: number, over: boolean): number {
   else if (stat === "hr") pOver = L <= 0.5 ? 0.13 : 0.05;
   else if (stat === "walks") pOver = L <= 0.5 ? 0.55 : 0.24;
   else if (stat === "k") pOver = L <= 3.5 ? 0.62 : L <= 5.5 ? 0.45 : L <= 7.5 ? 0.26 : 0.12;
+  else if (stat === "points") pOver = L <= 15.5 ? 0.72 : L <= 20.5 ? 0.48 : L <= 25.5 ? 0.32 : 0.18;
+  else if (stat === "rebounds") pOver = L <= 4.5 ? 0.68 : L <= 6.5 ? 0.45 : L <= 8.5 ? 0.28 : 0.16;
+  else if (stat === "assists") pOver = L <= 3.5 ? 0.7 : L <= 5.5 ? 0.44 : L <= 7.5 ? 0.26 : 0.14;
+  else if (stat === "threes") pOver = L <= 1.5 ? 0.58 : L <= 2.5 ? 0.4 : L <= 3.5 ? 0.24 : 0.12;
+  else if (stat === "pra") pOver = L <= 25.5 ? 0.65 : L <= 30.5 ? 0.42 : L <= 35.5 ? 0.26 : 0.14;
+  else if (stat === "blocks" || stat === "steals") pOver = L <= 0.5 ? 0.55 : L <= 1.5 ? 0.35 : 0.18;
   else pOver = 0.45;
   return over ? pOver : 1 - pOver;
 }
@@ -163,6 +169,11 @@ function baselineHitProb(bet: SlipBet): number {
     if (m === "player_tb") return 0.37 + jitter * 0.2;
     if (m === "player_hrr") return 0.39 + jitter * 0.18;
     if (m === "player_k") return 0.44 + jitter * 0.18;
+    if (stat === "points") return 0.42 + jitter * 0.18;
+    if (stat === "rebounds") return 0.4 + jitter * 0.18;
+    if (stat === "assists") return 0.4 + jitter * 0.18;
+    if (stat === "threes") return 0.36 + jitter * 0.2;
+    if (stat === "pra") return 0.41 + jitter * 0.17;
     return 0.35 + jitter * 0.2;
   }
   return 0.45 + jitter * 0.2;

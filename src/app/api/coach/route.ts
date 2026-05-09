@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAllMarkets } from "@/lib/apiClients";
+import { oddsProviderForSport, parseSportCode, type SportCode } from "@/lib/sportContext";
 import { createSeededRng, hashSeed, pickDiverseParlayMarkets, slipSignatureFromMarketIds } from "@/lib/parlaySampling";
 import { rateLimit } from "@/lib/rateLimit";
 import { americanToDecimal, decimalToAmerican, isPlayerPropMarketType, isSportsbookLineSource } from "@/lib/odds";
@@ -10,6 +11,8 @@ import type { Market, SlipBet } from "@/lib/types";
 
 type CoachReq = {
   question?: string;
+  /** `mlb` (default) or `nba` — same board/env split as dashboard. */
+  sport?: string;
   history?: Array<{ role: "user" | "coach"; text: string }>;
   payload?: {
     bets?: SlipBet[];
@@ -92,7 +95,7 @@ function enrichQuestionWithHistory(
   return `${q} (context from prior user message: "${lastUser.text.trim()}")`;
 }
 
-let lastGoodSportsbookProps: { at: number; markets: Market[] } | null = null;
+let lastGoodSportsbookProps: { at: number; markets: Market[]; sport: SportCode } | null = null;
 const LAST_GOOD_PROPS_TTL_MS = 1000 * 60 * 60 * 6;
 
 function toWords(s: string): string[] {
@@ -324,8 +327,8 @@ function questionMentionsBet(question: string, bet: SlipBet): boolean {
   return idHit || playerHit || selectionHit;
 }
 
-async function fetchLiveSportsbookMarkets(): Promise<Market[]> {
-  const board = await getAllMarkets();
+async function fetchLiveSportsbookMarkets(sport: SportCode): Promise<Market[]> {
+  const board = await getAllMarkets(sport);
   const book = board.filter((m) => isSportsbookLineSource(m.source));
   if (book.length) return book;
   /** Rundown 429 / no key: still run coach + parlays off model/mock board (simulation-only). */
@@ -399,6 +402,7 @@ export async function POST(req: NextRequest) {
     if (!rl.allowed) return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
 
     const body = (await req.json()) as CoachReq;
+    const sport = parseSportCode(body.sport);
     const question = String(body.question ?? "").trim();
     const history = Array.isArray(body.history) ? body.history.slice(-12) : [];
     const payload = body.payload ?? {};
@@ -467,13 +471,15 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const liveMarkets = await fetchLiveSportsbookMarkets();
+    const liveMarkets = await fetchLiveSportsbookMarkets(sport);
     const bookOnlyLive = liveMarkets.filter((m) => isSportsbookLineSource(m.source));
     if (bookOnlyLive.length) {
-      lastGoodSportsbookProps = { at: Date.now(), markets: bookOnlyLive };
+      lastGoodSportsbookProps = { at: Date.now(), markets: bookOnlyLive, sport };
     }
     const cacheValid =
-      !!lastGoodSportsbookProps && Date.now() - lastGoodSportsbookProps.at < LAST_GOOD_PROPS_TTL_MS;
+      !!lastGoodSportsbookProps &&
+      lastGoodSportsbookProps.sport === sport &&
+      Date.now() - lastGoodSportsbookProps.at < LAST_GOOD_PROPS_TTL_MS;
     const rawMarkets = liveMarkets.length
       ? liveMarkets
       : cacheValid
@@ -496,7 +502,7 @@ export async function POST(req: NextRequest) {
           : slipPlayerPool;
 
       if (propPool.length < legs) {
-        const provider = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
+        const provider = oddsProviderForSport(sport);
         const dbg = provider === "rundown" ? getRundownDebugState() : getOddsDebugState();
         return NextResponse.json({
           answer: formatAssistantReply(
@@ -663,7 +669,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const provider = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
+    const provider = oddsProviderForSport(sport);
     const dbg = provider === "rundown" ? getRundownDebugState() : getOddsDebugState();
     const slipSnapshot = uniqueById((payload.bets ?? []).map(toMarketFromSlipBet));
     const broadPool = uniqueById(

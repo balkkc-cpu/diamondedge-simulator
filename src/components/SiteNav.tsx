@@ -7,9 +7,11 @@ type Me = { id: string; email: string; displayName: string | null; emailVerified
 
 const links: [string, string][] = [
   ["/", "Dashboard"],
+  ["/nba", "NBA"],
   ["/bet-builder", "Bet Builder"],
   ["/simulation-results", "Results"],
-  ["/live-tracker", "Live"],
+  ["/live-tracker", "Live MLB"],
+  ["/live-tracker?sport=nba", "Live NBA"],
   ["/community", "Wins board"],
   ["/library", "My library"],
   ["/upgrade", "Plus"],

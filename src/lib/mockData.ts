@@ -89,6 +89,77 @@ export const mockMarkets: Market[] = [
   { id: "m14", gameId: "mock-game-003", marketType: "first5", selection: "SEA +0.5", line: 0.5, american: -110, source: "mock" }
 ];
 
+export const mockNbaGames: GameCard[] = [
+  {
+    id: "nba-mock-001",
+    homeTeamId: 1,
+    awayTeamId: 2,
+    startTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+    status: "scheduled",
+    homeTeam: "Los Angeles Lakers",
+    awayTeam: "Boston Celtics",
+    weather: "Indoor",
+    ballpark: "Crypto.com Arena",
+    probablePitchers: "Starters TBD",
+    delayInfo: null
+  },
+  {
+    id: "nba-mock-002",
+    homeTeamId: 3,
+    awayTeamId: 4,
+    startTime: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+    status: "scheduled",
+    homeTeam: "Milwaukee Bucks",
+    awayTeam: "Philadelphia 76ers",
+    weather: "Indoor",
+    ballpark: "Fiserv Forum",
+    probablePitchers: "Starters TBD",
+    delayInfo: null
+  }
+];
+
+export const mockNbaMarkets: Market[] = [
+  { id: "nb1", gameId: "nba-mock-001", marketType: "moneyline", selection: "Los Angeles Lakers", line: null, american: -108, source: "mock" },
+  { id: "nb2", gameId: "nba-mock-001", marketType: "moneyline", selection: "Boston Celtics", line: null, american: -112, source: "mock" },
+  {
+    id: "nb3",
+    gameId: "nba-mock-001",
+    marketType: "runline",
+    selection: "Los Angeles Lakers -4.5",
+    line: -4.5,
+    american: -110,
+    source: "mock"
+  },
+  { id: "nb4", gameId: "nba-mock-001", marketType: "total", selection: "Over 224.5", line: 224.5, american: -108, source: "mock" },
+  { id: "nb5", gameId: "nba-mock-001", marketType: "total", selection: "Under 224.5", line: 224.5, american: -112, source: "mock" },
+  {
+    id: "nb6",
+    gameId: "nba-mock-001",
+    marketType: "player_points",
+    selection: "LeBron James · Over 24.5 Points",
+    line: 24.5,
+    american: -115,
+    source: "mock",
+    playerName: "LeBron James",
+    statKey: "points",
+    pickKind: "over_under"
+  },
+  {
+    id: "nb7",
+    gameId: "nba-mock-001",
+    marketType: "player_points",
+    selection: "Jayson Tatum · Over 27.5 Points",
+    line: 27.5,
+    american: -118,
+    source: "mock",
+    playerName: "Jayson Tatum",
+    statKey: "points",
+    pickKind: "over_under"
+  },
+  { id: "nb8", gameId: "nba-mock-002", marketType: "moneyline", selection: "Milwaukee Bucks", line: null, american: -125, source: "mock" },
+  { id: "nb9", gameId: "nba-mock-002", marketType: "total", selection: "Over 219.5", line: 219.5, american: -110, source: "mock" }
+];
+
 export const mockGameDetails: Record<string, GameDetail> = {
   "mock-game-001": {
     gameId: "mock-game-001",

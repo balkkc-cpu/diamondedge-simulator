@@ -17,3 +17,4 @@ mobile/dist
 .env.vercel.pulled
 .env.vercel.pull
 .env.vercel.pull.dev
+*.tsbuildinfo

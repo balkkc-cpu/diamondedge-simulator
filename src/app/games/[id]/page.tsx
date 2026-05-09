@@ -1,18 +1,26 @@
 import Link from "next/link";
-import { getDailySchedule, getGameDetail, getOddsMarkets } from "@/lib/apiClients";
+import { getDailyScheduleSport, getGameDetailSport, getOddsMarkets } from "@/lib/apiClients";
+import { parseSportCode, type SportCode } from "@/lib/sportContext";
 import { formatDateTimeEastern } from "@/lib/timeDisplay";
 import { isPlayerPropMarketType } from "@/lib/odds";
 import { GameCard, GameDetail, Market } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function GameDetailPage({ params }: { params: { id: string } }) {
-  const games: GameCard[] = await getDailySchedule();
+export default async function GameDetailPage({
+  params,
+  searchParams
+}: {
+  params: { id: string };
+  searchParams?: { sport?: string };
+}) {
+  const sport: SportCode = parseSportCode(searchParams?.sport);
+  const games: GameCard[] = await getDailyScheduleSport(sport);
   const game = games.find((g) => g.id === params.id) ?? games[0];
-  const allForGame: Market[] = await getOddsMarkets(game?.id ?? "mock-game-001");
+  const allForGame: Market[] = await getOddsMarkets(game?.id ?? "mock-game-001", sport);
   const lineMarkets = allForGame.filter((m) => !isPlayerPropMarketType(m.marketType));
   const propCount = allForGame.length - lineMarkets.length;
-  const detail: GameDetail = await getGameDetail(game?.id ?? "mock-game-001");
+  const detail: GameDetail = await getGameDetailSport(sport, game?.id ?? "mock-game-001");
 
   if (!game) return <main className="panel p-4">No game found.</main>;
 
@@ -46,7 +54,7 @@ export default async function GameDetailPage({ params }: { params: { id: string 
             {propCount} player prop lines for this game — open Bet Builder to browse and simulate.
           </p>
         ) : null}
-        <Link href={`/bet-builder?game=${game.id}`} className="btn-primary mt-4 inline-block">
+        <Link href={`/bet-builder?game=${game.id}&sport=${sport}`} className="btn-primary mt-4 inline-block">
           Open Bet Builder for this game
         </Link>
       </section>
@@ -91,7 +99,7 @@ export default async function GameDetailPage({ params }: { params: { id: string 
           ))}
         </div>
       </section>
-      <Link href={`/bet-builder?game=${game.id}`} className="btn-muted w-fit text-sm">
+      <Link href={`/bet-builder?game=${game.id}&sport=${sport}`} className="btn-muted w-fit text-sm">
         Bet Builder (same game)
       </Link>
     </main>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { SportCode } from "@/lib/sportContext";
 
 type ReportLeg = {
   selection: string;
@@ -55,7 +56,8 @@ function Meter({
   );
 }
 
-export function DashboardCoachTab() {
+export function DashboardCoachTab(props: { sport?: SportCode }) {
+  const sport = props.sport ?? "mlb";
   const [active, setActive] = useState<"coach" | "report">("coach");
   const [loading, setLoading] = useState(false);
   const [question, setQuestion] = useState("");
@@ -71,6 +73,7 @@ export function DashboardCoachTab() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          sport,
           question: "best random 3-leg parlay",
           payload: {},
           history: [...chat, { role: "user", text: userLine }]
@@ -103,7 +106,7 @@ export function DashboardCoachTab() {
       const res = await fetch("/api/coach", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, payload: {}, history: nextHistory })
+        body: JSON.stringify({ sport, question: q, payload: {}, history: nextHistory })
       });
       const data = await res.json();
       const answer = typeof data?.answer === "string" ? data.answer : "Coach could not generate a response.";
@@ -129,7 +132,7 @@ export function DashboardCoachTab() {
       const res = await fetch("/api/coach", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, payload: {}, history: nextHistory })
+        body: JSON.stringify({ sport, question: q, payload: {}, history: nextHistory })
       });
       const data = await res.json();
       const answer = typeof data?.answer === "string" ? data.answer : "Coach could not generate a response.";

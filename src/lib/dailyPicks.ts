@@ -1,7 +1,8 @@
-import { getAllMarkets, getDailySchedule, mlbDateStringEt } from "./apiClients";
+import { getAllMarkets, getDailyScheduleSport, mlbDateStringEt } from "./apiClients";
 import { createSeededRng, hashSeed, shuffleInPlace } from "./parlaySampling";
 import { isPlayerPropMarketType, isSportsbookLineSource } from "./odds";
-import { mockMarkets } from "./mockData";
+import { mockMarkets, mockNbaMarkets } from "./mockData";
+import type { SportCode } from "./sportContext";
 import { runSimulation1000 } from "./simEngine";
 import type { Market, SlipBet } from "./types";
 
@@ -82,13 +83,13 @@ export type DailyPickRow = {
   };
 };
 
-export async function getDailyPicksPayload(): Promise<{
+export async function getDailyPicksPayload(sport: SportCode = "mlb"): Promise<{
   generatedAt: string;
   gamesCount: number;
   picks: DailyPickRow[];
 }> {
-  const games = await getDailySchedule();
-  const markets = await getAllMarkets();
+  const games = await getDailyScheduleSport(sport);
+  const markets = await getAllMarkets(sport);
 
   const priced = markets.filter((m) => Number.isFinite(m.american) && m.american >= -150 && m.american <= 150);
   const sportsbookFirst = priced.filter((m) => isSportsbookLineSource(m.source));
@@ -99,7 +100,9 @@ export async function getDailyPicksPayload(): Promise<{
   // If the real board is empty (off-days / no odds), fall back to mock board
   // so the widget never shows up completely blank.
   if (!candidates.length) {
-    const mockBoard = mockMarkets.filter((m) => m.marketType !== "yrfi" && m.marketType !== "nrfi");
+    const mockBoard = (sport === "nba" ? mockNbaMarkets : mockMarkets).filter(
+      (m) => m.marketType !== "yrfi" && m.marketType !== "nrfi"
+    );
     candidates = candidateStraightBets(mockBoard, 3);
   }
   if (!candidates.length) {
