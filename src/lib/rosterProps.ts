@@ -334,11 +334,26 @@ export async function filterRundownMislabeledPlayerProps(markets: Market[], game
     const game = gameById.get(m.gameId);
     if (!game) continue;
     const roster = await rosterFor(m.gameId);
-    if (!roster.size) continue;
+    if (!roster.size) {
+      if (
+        m.statKey &&
+        playerPropSelectionLooksStatBased(m.selection) &&
+        !isTeamLabelAsPlayer(m.playerName, game) &&
+        String(m.playerName ?? "")
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean).length >= 2
+      ) {
+        out.push(m);
+      }
+      continue;
+    }
     if (isTeamLabelAsPlayer(m.playerName, game)) continue;
-    if (!rosterContainsPlayerLabel(m.playerName, roster)) continue;
     if (!m.statKey) continue;
     if (!playerPropSelectionLooksStatBased(m.selection)) continue;
+    // Active roster match is best-effort only — MLB vs affiliate naming often diverges; shaped stat
+    // rows with a real two-word player label are kept so the board is not empty.
+    if (String(m.playerName ?? "").trim().split(/\s+/).filter(Boolean).length < 2) continue;
     out.push(m);
   }
   return out;

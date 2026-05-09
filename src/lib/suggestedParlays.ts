@@ -9,6 +9,8 @@ export type SuggestedParlayLeg = {
   selection: string;
   marketType: string;
   gameId: string;
+  /** Short slate label, e.g. "NYY @ BOS" */
+  matchup: string;
   hitProbability: number;
   impliedProbability: number;
   edge: number;
@@ -22,6 +24,9 @@ export type SuggestedParlayCard = {
   kind: "hr" | "bases" | "hits" | "rbis" | "mixed";
   legs: SuggestedParlayLeg[];
   parlayHitProbability: number;
+  /** 0–1 blend of model edge + per-leg hit strength (not the same as parlay hit %). */
+  parlayQualityScore01: number;
+  distinctGameCount: number;
   simContext: {
     iterations: number;
     runEnvironmentNote: string;
@@ -77,8 +82,37 @@ function playerFromSelection(selection: string): string {
   return head.trim().toLowerCase().slice(0, 56);
 }
 
-/** Picks legs with different players/games when possible; uses seeded shuffle so each refresh varies. */
-function pickLegsDiverse(
+function countDistinctGames(legs: SuggestedParlayLeg[]): number {
+  return new Set(legs.map((l) => l.gameId)).size;
+}
+
+/** Minimum distinct games when the board actually has that many games with props. */
+function requiredMinDistinctGames(targetLegs: number, uniqueGamesInPool: number): number {
+  if (uniqueGamesInPool <= 1) return 1;
+  if (targetLegs <= 2) return Math.min(2, uniqueGamesInPool, targetLegs);
+  if (targetLegs === 3) return Math.min(2, uniqueGamesInPool);
+  return Math.min(3, uniqueGamesInPool);
+}
+
+function clamp01(x: number): number {
+  return Math.max(0, Math.min(1, x));
+}
+
+/** 0–1 “quality” from average edge + hit rate (for UI meter, not payout odds). */
+function parlayQualityScore01(legs: SuggestedParlayLeg[]): number {
+  if (!legs.length) return 0;
+  const meanEdge = legs.reduce((s, l) => s + l.edge, 0) / legs.length;
+  const meanHit = legs.reduce((s, l) => s + l.hitProbability, 0) / legs.length;
+  const edge01 = clamp01((meanEdge + 0.02) / 0.22);
+  const hit01 = clamp01(meanHit);
+  return clamp01(0.45 * hit01 + 0.55 * edge01);
+}
+
+/**
+ * Round-robin games across leg slots (e.g. 3 legs, 2 games → A,B,A) so parlays
+ * use multiple matchups instead of collapsing to one game after the first pass.
+ */
+function pickLegsMultiGame(
   candidates: SuggestedParlayLeg[],
   targetLegs: number,
   minHit: number,
@@ -88,29 +122,75 @@ function pickLegsDiverse(
     candidates.filter((x) => x.hitProbability >= minHit),
     rng
   );
-  const out: SuggestedParlayLeg[] = [];
+  if (!pool.length) return [];
+
+  const byGame = new Map<string, SuggestedParlayLeg[]>();
+  for (const c of pool) {
+    const arr = byGame.get(c.gameId) ?? [];
+    arr.push(c);
+    byGame.set(c.gameId, arr);
+  }
+  for (const arr of byGame.values()) {
+    arr.sort((a, b) => b.hitProbability - a.hitProbability);
+  }
+
+  const gameIds = shuffleInPlace([...byGame.keys()], rng);
   const usedPlayers = new Set<string>();
-  const usedGames = new Set<string>();
+  const usedBets = new Set<string>();
+  const out: SuggestedParlayLeg[] = [];
+
+  const assignment: string[] = [];
+  for (let i = 0; i < targetLegs; i++) {
+    assignment.push(gameIds[i % gameIds.length]!);
+  }
+
+  for (const gid of assignment) {
+    if (out.length >= targetLegs) break;
+    let picked: SuggestedParlayLeg | undefined;
+    for (const c of byGame.get(gid) ?? []) {
+      if (usedBets.has(c.betId)) continue;
+      const pk = playerFromSelection(c.selection);
+      if (pk && usedPlayers.has(pk)) continue;
+      picked = c;
+      break;
+    }
+    if (picked) {
+      usedBets.add(picked.betId);
+      const pk = playerFromSelection(picked.selection);
+      if (pk) usedPlayers.add(pk);
+      out.push(picked);
+      continue;
+    }
+    outer: for (const g2 of gameIds) {
+      for (const c of byGame.get(g2) ?? []) {
+        if (usedBets.has(c.betId)) continue;
+        const pk = playerFromSelection(c.selection);
+        if (pk && usedPlayers.has(pk)) continue;
+        usedBets.add(c.betId);
+        if (pk) usedPlayers.add(pk);
+        out.push(c);
+        break outer;
+      }
+    }
+  }
 
   for (const c of pool) {
     if (out.length >= targetLegs) break;
+    if (usedBets.has(c.betId)) continue;
     const pk = playerFromSelection(c.selection);
     if (pk && usedPlayers.has(pk)) continue;
-    if (usedGames.has(c.gameId)) continue;
+    usedBets.add(c.betId);
     if (pk) usedPlayers.add(pk);
-    usedGames.add(c.gameId);
     out.push(c);
   }
   for (const c of pool) {
     if (out.length >= targetLegs) break;
-    const pk = playerFromSelection(c.selection);
-    if (pk && out.some((x) => playerFromSelection(x.selection) === pk)) continue;
-    out.push(c);
+    if (!usedBets.has(c.betId)) {
+      usedBets.add(c.betId);
+      out.push(c);
+    }
   }
-  for (const c of pool) {
-    if (out.length >= targetLegs) break;
-    if (!out.some((x) => x.betId === c.betId)) out.push(c);
-  }
+
   return out.slice(0, targetLegs);
 }
 
@@ -129,30 +209,34 @@ function pickStochasticLegSet(
   kind: string
 ): SuggestedParlayLeg[] {
   if (!candidates.length) return [];
-  const attempts = 18;
+  const uniqueGames = new Set(candidates.map((c) => c.gameId)).size;
+  const minG = requiredMinDistinctGames(targetLegs, uniqueGames);
+  const attempts = 22;
   const bundles: SuggestedParlayLeg[][] = [];
   const seen = new Set<string>();
   for (let i = 0; i < attempts; i++) {
     const rng = createSeededRng(hashSeed([kind, String(diversitySeed), String(i), "parlay-try"]));
-    const legs = pickLegsDiverse(candidates, targetLegs, minHit, rng);
+    const legs = pickLegsMultiGame(candidates, targetLegs, minHit, rng);
     if (legs.length < Math.min(2, targetLegs)) continue;
+    if (uniqueGames >= minG && countDistinctGames(legs) < minG) continue;
     const sig = slipSignatureLegs(legs);
     if (seen.has(sig)) continue;
     seen.add(sig);
     bundles.push(legs);
   }
   if (!bundles.length) {
-    return pickLegsDiverse(
-      candidates,
-      targetLegs,
-      minHit,
-      createSeededRng(hashSeed([kind, "fallback", String(diversitySeed)]))
-    );
+    const relaxRng = createSeededRng(hashSeed([kind, "fallback", String(diversitySeed)]));
+    return pickLegsMultiGame(candidates, targetLegs, minHit * 0.55, relaxRng);
   }
-  const scored = bundles.map((legs) => {
+  const diverseEnough = (legs: SuggestedParlayLeg[]) =>
+    uniqueGames < minG || countDistinctGames(legs) >= minG;
+  const pool = bundles.filter(diverseEnough);
+  const scored = (pool.length ? pool : bundles).map((legs) => {
     const p = legs.reduce((a, x) => a * x.hitProbability, 1);
+    const d = countDistinctGames(legs);
+    const spreadBonus = d >= minG ? 1.1 : d >= minG - 1 && minG > 1 ? 1.0 : 0.88;
     const jitterRng = createSeededRng(hashSeed([kind, slipSignatureLegs(legs), String(diversitySeed), "jit"]));
-    return { legs, w: p * (0.86 + jitterRng() * 0.28) };
+    return { legs, w: p * spreadBonus * (0.86 + jitterRng() * 0.28) };
   });
   scored.sort((a, b) => b.w - a.w);
   const topBand = scored.slice(0, Math.min(10, scored.length));
@@ -189,6 +273,7 @@ export async function buildSuggestedParlaysFromBoard(input: {
 
   const byId = new Map(sim.results.map((r) => [r.betId, r]));
   const breakdownById = new Map(sim.breakdowns.map((b) => [b.betId, b]));
+  const matchupByGameId = new Map(input.games.map((g) => [g.id, `${g.awayTeam} @ ${g.homeTeam}`]));
 
   const enriched: SuggestedParlayLeg[] = slip
     .map((b) => {
@@ -200,6 +285,7 @@ export async function buildSuggestedParlaysFromBoard(input: {
         selection: b.selection,
         marketType: b.marketType,
         gameId: b.gameId,
+        matchup: matchupByGameId.get(b.gameId) ?? "Matchup TBD",
         hitProbability: r.hitProbability,
         impliedProbability: r.impliedProbability,
         edge: r.edge,
@@ -310,10 +396,15 @@ export async function buildSuggestedParlaysFromBoard(input: {
       parlayHitProbability: 0,
       simContext
     }
-  ].map((c) => ({
-    ...c,
-    parlayHitProbability: c.legs.reduce((acc, x) => acc * x.hitProbability, 1)
-  })) satisfies SuggestedParlayCard[];
+  ].map((c) => {
+    const parlayHitProbability = c.legs.reduce((acc, x) => acc * x.hitProbability, 1);
+    return {
+      ...c,
+      parlayHitProbability,
+      parlayQualityScore01: parlayQualityScore01(c.legs),
+      distinctGameCount: countDistinctGames(c.legs)
+    };
+  }) satisfies SuggestedParlayCard[];
 
   return cards;
 }

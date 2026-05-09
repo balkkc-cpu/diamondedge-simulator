@@ -185,6 +185,8 @@ export function GameLinesRow({
               {GAME_LINE_LABEL[m.marketType] ?? m.marketType.replace(/^rundown_/, "").replace(/_/g, " ")}
               {isSportsbookLineSource(m.source) ? (
                 <span className="ml-1 rounded bg-emerald-900/40 px-1 text-[9px] font-bold uppercase text-emerald-300">board</span>
+              ) : m.source === "model" ? (
+                <span className="ml-1 rounded bg-slate-700/80 px-1 text-[9px] font-bold uppercase text-slate-300">sim</span>
               ) : null}
             </span>
             <span className="block">{m.selection}</span>

@@ -64,18 +64,23 @@ export function DashboardCoachTab() {
   const [report, setReport] = useState<ParlayReport | null>(null);
 
   async function generateRandomParlay() {
+    const userLine = "Generate a strong random 3-leg parlay from live board.";
     setLoading(true);
     try {
       const res = await fetch("/api/coach", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: "best random 3-leg parlay", payload: {} })
+        body: JSON.stringify({
+          question: "best random 3-leg parlay",
+          payload: {},
+          history: [...chat, { role: "user", text: userLine }]
+        })
       });
       const data = await res.json();
       setMessage(typeof data?.answer === "string" ? data.answer : "Coach could not generate a response.");
       setChat((prev) => [
         ...prev,
-        { role: "user", text: "Generate a strong random 3-leg parlay from live board." },
+        { role: "user", text: userLine },
         { role: "coach", text: typeof data?.answer === "string" ? data.answer : "Coach could not generate a response." }
       ]);
       setReport(data?.parlayReport ?? null);
@@ -94,10 +99,11 @@ export function DashboardCoachTab() {
     setChat((prev) => [...prev, { role: "user", text: q }]);
     setQuestion("");
     try {
+      const nextHistory = [...chat, { role: "user" as const, text: q }];
       const res = await fetch("/api/coach", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, payload: {} })
+        body: JSON.stringify({ question: q, payload: {}, history: nextHistory })
       });
       const data = await res.json();
       const answer = typeof data?.answer === "string" ? data.answer : "Coach could not generate a response.";
@@ -119,10 +125,11 @@ export function DashboardCoachTab() {
     setLoading(true);
     setChat((prev) => [...prev, { role: "user", text: q }]);
     try {
+      const nextHistory = [...chat, { role: "user" as const, text: q }];
       const res = await fetch("/api/coach", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, payload: {} })
+        body: JSON.stringify({ question: q, payload: {}, history: nextHistory })
       });
       const data = await res.json();
       const answer = typeof data?.answer === "string" ? data.answer : "Coach could not generate a response.";
@@ -193,10 +200,13 @@ export function DashboardCoachTab() {
               className="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
             />
             <button type="button" className="btn-muted text-sm" onClick={askCoach} disabled={loading || !question.trim()}>
-              {loading ? "..." : "Ask"}
+              {loading ? "Thinking..." : "Ask"}
             </button>
             <button type="button" className="btn-muted text-sm" onClick={generateRandomParlay} disabled={loading}>
               {loading ? "..." : "Generate"}
+            </button>
+            <button type="button" className="btn-muted text-sm" onClick={() => setChat([])} disabled={loading || !chat.length}>
+              Clear
             </button>
           </div>
           <div className="thin-scrollbar max-h-56 space-y-2 overflow-y-auto pr-1">
@@ -219,6 +229,12 @@ export function DashboardCoachTab() {
             ) : (
               <p className="text-xs text-slate-500">No chat yet. Ask a question or generate a parlay.</p>
             )}
+            {loading ? (
+              <div className="rounded border border-slate-700/70 bg-slate-950/60 p-2 text-xs text-slate-300">
+                <span className="mb-1 block text-[10px] uppercase tracking-wide text-slate-400">Coach</span>
+                Thinking through live lines and sim context...
+              </div>
+            ) : null}
           </div>
           {message && !chat.length ? (
             <p className="rounded border border-slate-700/70 bg-slate-950/60 p-2 text-xs text-slate-300 whitespace-pre-line">{message}</p>

@@ -4,6 +4,8 @@ import { formatDateTimeEastern } from "@/lib/timeDisplay";
 import { isPlayerPropMarketType } from "@/lib/odds";
 import { GameCard, GameDetail, Market } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+
 export default async function GameDetailPage({ params }: { params: { id: string } }) {
   const games: GameCard[] = await getDailySchedule();
   const game = games.find((g) => g.id === params.id) ?? games[0];

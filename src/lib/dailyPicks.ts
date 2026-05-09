@@ -1,4 +1,5 @@
-import { getAllMarkets, getDailySchedule } from "./apiClients";
+import { getAllMarkets, getDailySchedule, mlbDateStringEt } from "./apiClients";
+import { createSeededRng, hashSeed, shuffleInPlace } from "./parlaySampling";
 import { isPlayerPropMarketType, isSportsbookLineSource } from "./odds";
 import { mockMarkets } from "./mockData";
 import { runSimulation1000 } from "./simEngine";
@@ -28,15 +29,25 @@ function candidateStraightBets(markets: Market[], maxPerGame = 3): SlipBet[] {
     byGame.get(m.gameId)!.push(m);
   }
 
+  const dayKey = mlbDateStringEt();
+  const gameOrder = shuffleInPlace([...byGame.keys()], createSeededRng(hashSeed(["daily-game-order", dayKey])));
+
   const out: SlipBet[] = [];
-  for (const [, arr] of byGame) {
+  for (const gid of gameOrder) {
+    const arr = byGame.get(gid) ?? [];
     const fdFirst = (a: Market[]) => {
       const fd = a.filter((x) => isSportsbookLineSource(x.source));
       return fd.length ? fd : a;
     };
 
-    const lines = fdFirst(arr.filter((m) => !isPlayerPropMarketType(m.marketType)));
-    const props = fdFirst(arr.filter((m) => isPlayerPropMarketType(m.marketType)));
+    const lines = shuffleInPlace(
+      fdFirst(arr.filter((m) => !isPlayerPropMarketType(m.marketType))),
+      createSeededRng(hashSeed(["daily-lines", dayKey, gid]))
+    );
+    const props = shuffleInPlace(
+      fdFirst(arr.filter((m) => isPlayerPropMarketType(m.marketType))),
+      createSeededRng(hashSeed(["daily-props", dayKey, gid]))
+    );
 
     const takeLines = lines.slice(0, maxPerGame);
     const takeProps = props.slice(0, maxPerGame);
@@ -46,7 +57,7 @@ function candidateStraightBets(markets: Market[], maxPerGame = 3): SlipBet[] {
     }
     if (out.length >= 24) break;
   }
-  return out;
+  return shuffleInPlace(out, createSeededRng(hashSeed(["daily-cand-final", dayKey])));
 }
 
 export type DailyPickRow = {
@@ -79,8 +90,7 @@ export async function getDailyPicksPayload(): Promise<{
   const games = await getDailySchedule();
   const markets = await getAllMarkets();
 
-  // Focus on markets in a reasonable price band around even money.
-  const priced = markets.filter((m) => m.american >= -150 && m.american <= 150);
+  const priced = markets.filter((m) => Number.isFinite(m.american) && m.american >= -150 && m.american <= 150);
   const sportsbookFirst = priced.filter((m) => isSportsbookLineSource(m.source));
   const baseBoard = sportsbookFirst.length ? sportsbookFirst : priced.length ? priced : markets;
 
@@ -97,9 +107,14 @@ export async function getDailyPicksPayload(): Promise<{
   }
 
   const sim = runSimulation1000(candidates, { iterations: 800 });
+  const dayKey = mlbDateStringEt();
   const ranked = sim.results
     .map((r, i) => ({ slip: candidates[i], result: r, breakdown: sim.breakdowns[i] }))
-    .sort((a, b) => b.result.edge - a.result.edge)
+    .sort((a, b) => {
+      const d = b.result.edge - a.result.edge;
+      if (Math.abs(d) > 1e-7) return d;
+      return hashSeed([a.slip.id, dayKey]) - hashSeed([b.slip.id, dayKey]);
+    })
     .slice(0, 6);
 
   const picks: DailyPickRow[] = ranked.map((row, idx) => {

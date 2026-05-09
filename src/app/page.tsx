@@ -10,6 +10,8 @@ import { DashboardSuggestedParlays } from "@/components/DashboardSuggestedParlay
 import { DashboardCoachTab } from "@/components/DashboardCoachTab";
 import { DashboardHighlights } from "@/components/DashboardHighlights";
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardPage() {
   const games: GameCard[] = await getDailySchedule();
   const injuries = await getInjuries();
@@ -63,7 +65,7 @@ export default async function DashboardPage() {
           </p>
         </div>
 
-        <DashboardSuggestedPicks picks={daily.picks} />
+        <DashboardSuggestedPicks picks={daily.picks} generatedAt={daily.generatedAt} />
         <DashboardSuggestedParlays parlays={parlays} initialLegs={3} />
       </section>
 

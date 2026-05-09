@@ -8,5 +8,9 @@ export async function GET(req: Request) {
   if (!rl.allowed) return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
 
   const payload = await getDailyPicksPayload();
-  return NextResponse.json(payload);
+  return NextResponse.json(payload, {
+    headers: {
+      "Cache-Control": "private, no-store, max-age=0, must-revalidate"
+    }
+  });
 }

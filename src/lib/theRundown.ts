@@ -1,4 +1,5 @@
 import { isPlayerPropMarketType } from "./odds";
+import { teamsMatchLoose } from "./theOddsFanDuel";
 import { HITTER_MATRIX, PITCHER_MATRIX, type PickKind, type StatKey } from "./playerPropCatalog";
 import { playerPropSelectionLooksStatBased } from "./rosterProps";
 import type { GameCard, Market } from "./types";
@@ -163,27 +164,71 @@ function marketTypeFromName(name: string): string {
   return `rundown_${n.replace(/[^a-z0-9]+/g, "_")}`;
 }
 
-function normTeam(s: string): string {
-  return s.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
-}
-
-function teamsMatchLoose(a: string, b: string): boolean {
-  const x = normTeam(a);
-  const y = normTeam(b);
-  if (!x || !y) return false;
-  if (x === y) return true;
-  return x.includes(y) || y.includes(x);
+/**
+ * Map Rundown events to MLB Stats `gamePk` ids. Must use the same team matching as The Odds API path
+ * (`theOddsFanDuel.teamsMatchLoose` + nicknames); the previous `includes`-only matcher missed many slates
+ * so every prop kept `event_id` and disappeared in the bet builder (filters by slate `game.id`).
+ */
+function extractRundownEventTeams(ev: any): { away: string; home: string } {
+  const teams: any[] = Array.isArray(ev?.teams) ? ev.teams : [];
+  const awayTeam = teams.find(
+    (t) => t?.is_away === true || t?.is_away === 1 || String(t?.is_away).toLowerCase() === "true"
+  );
+  const homeTeam = teams.find(
+    (t) => t?.is_away === false || t?.is_away === 0 || String(t?.is_away).toLowerCase() === "false"
+  );
+  let away = String(awayTeam?.name ?? "").trim();
+  let home = String(homeTeam?.name ?? "").trim();
+  if (!away && teams[0]) away = String(teams[0]?.name ?? "").trim();
+  if (!home && teams[1]) home = String(teams[1]?.name ?? "").trim();
+  if (!away || !home) {
+    away = away || String(ev?.away_team ?? ev?.AwayTeam ?? ev?.awayTeam ?? "").trim();
+    home = home || String(ev?.home_team ?? ev?.HomeTeam ?? ev?.homeTeam ?? "").trim();
+  }
+  if ((!away || !home) && teams.length >= 2) {
+    const n0 = String(teams[0]?.name ?? "").trim();
+    const n1 = String(teams[1]?.name ?? "").trim();
+    if (n0 && n1) {
+      away = away || n0;
+      home = home || n1;
+    }
+  }
+  return { away, home };
 }
 
 function resolveGameIdFromEvent(ev: any, games: GameCard[]): string {
   if (!games.length) return String(ev?.event_id ?? "");
-  const teams: any[] = Array.isArray(ev?.teams) ? ev.teams : [];
-  const away = String(teams.find((t) => t?.is_away)?.name ?? teams[0]?.name ?? "");
-  const home = String(teams.find((t) => t?.is_away === false)?.name ?? teams[1]?.name ?? "");
-  const match =
-    games.find((g) => teamsMatchLoose(g.awayTeam, away) && teamsMatchLoose(g.homeTeam, home)) ??
-    games.find((g) => teamsMatchLoose(g.awayTeam, home) && teamsMatchLoose(g.homeTeam, away));
-  return match?.id ?? String(ev?.event_id ?? "");
+
+  const tryExternalGamePk = (): string | undefined => {
+    const candidates = [
+      ev?.game_pk,
+      ev?.gamePk,
+      ev?.mlb_game_pk,
+      ev?.mlbGamePk,
+      ev?.statsapi_game_id,
+      ev?.statsApiGameId,
+      ev?.game_id,
+      ev?.external_id
+    ];
+    for (const c of candidates) {
+      if (c == null || c === "") continue;
+      const id = String(c).trim();
+      if (games.some((g) => g.id === id)) return id;
+    }
+    return undefined;
+  };
+
+  const fromPk = tryExternalGamePk();
+  if (fromPk) return fromPk;
+
+  const { away, home } = extractRundownEventTeams(ev);
+  if (away && home) {
+    const match =
+      games.find((g) => teamsMatchLoose(g.awayTeam, away) && teamsMatchLoose(g.homeTeam, home)) ??
+      games.find((g) => teamsMatchLoose(g.awayTeam, home) && teamsMatchLoose(g.homeTeam, away));
+    if (match) return match.id;
+  }
+  return String(ev?.event_id ?? "");
 }
 
 function ouSideFromFeedExtras(p: any, ln: any): "over" | "under" | undefined {

@@ -1,14 +1,22 @@
 import Link from "next/link";
 import type { DailyPickRow } from "@/lib/dailyPicks";
 
-export function DashboardSuggestedPicks({ picks }: { picks: DailyPickRow[] }) {
+export function DashboardSuggestedPicks(props: { picks: DailyPickRow[]; generatedAt?: string }) {
+  const { picks, generatedAt } = props;
+  const stamp = generatedAt
+    ? new Date(generatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    : null;
   return (
     <div className="panel flex h-full min-h-[320px] flex-col p-4 lg:min-h-0">
       <div className="mb-3 shrink-0 border-b border-slate-700/50 pb-3">
         <h3 className="text-lg font-bold tracking-tight text-sky-300">Suggested bets today</h3>
+        {stamp ? (
+          <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">Slate mix for {stamp}</p>
+        ) : null}
         <p className="mt-1 text-xs leading-relaxed text-slate-400">
           Pre-scanned from the merged board and run through the same 800-run sim as the rest of the app. Ranked by sim edge
-          vs breakeven; copy is for research only — not betting advice.
+          vs breakeven; copy is for research only — not betting advice. Order reshuffles by MLB calendar day (Eastern) so the
+          mix updates each game day.
         </p>
       </div>
 

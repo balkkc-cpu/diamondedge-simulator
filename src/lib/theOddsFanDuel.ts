@@ -582,8 +582,8 @@ async function mergeNonFeaturedForOneEvent(apiKey: string, sportKey: string, ev:
 
 async function enrichMlbEventsWithPerEventOdds(apiKey: string, sportKey: string, events: unknown[]): Promise<unknown[]> {
   if (!events.length) return events;
-  const maxRaw = Number(process.env.MLB_EVENT_ODDS_MAX ?? "12");
-  const maxMerge = Math.max(1, Math.min(Number.isFinite(maxRaw) ? maxRaw : 12, events.length));
+  const maxRaw = Number(process.env.MLB_EVENT_ODDS_MAX ?? "20");
+  const maxMerge = Math.max(1, Math.min(Number.isFinite(maxRaw) ? maxRaw : 20, events.length));
   const concRaw = Number(process.env.MLB_EVENT_ODDS_CONCURRENCY ?? "3");
   const concurrency = Math.max(1, Math.min(Number.isFinite(concRaw) ? concRaw : 6, maxMerge));
 

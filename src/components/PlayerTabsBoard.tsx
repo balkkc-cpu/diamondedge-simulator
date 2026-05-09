@@ -100,6 +100,8 @@ export function PlayerTabsBoard({
                   <span className="ml-1.5 rounded bg-emerald-900/50 px-1 text-[9px] font-bold uppercase text-emerald-300">
                     live
                   </span>
+                ) : m.source === "model" ? (
+                  <span className="ml-1.5 rounded bg-slate-700/90 px-1 text-[9px] font-bold uppercase text-slate-300">sim</span>
                 ) : null}
                 <div className="mt-0.5 text-slate-300">{tail}</div>
               </button>

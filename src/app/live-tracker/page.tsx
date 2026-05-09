@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { LiveTrackerClient } from "./tracker-client";
 
+export const dynamic = "force-dynamic";
+
 export default async function LiveTrackerPage() {
   const games = await getDailySchedule();
   const preferred =

@@ -21,6 +21,13 @@ export async function GET(req: Request) {
     parlayLegs: legs,
     diversitySeed: Date.now()
   });
-  return NextResponse.json({ parlays });
+  return NextResponse.json(
+    { parlays },
+    {
+      headers: {
+        "Cache-Control": "private, no-store, max-age=0, must-revalidate"
+      }
+    }
+  );
 }
 

@@ -68,9 +68,47 @@ function normTeamOrPlayerLabel(s: string): string {
  * True for markets that should appear under “player props” in the UI.
  * Filters out mis-tagged team run/spread rows (often `player_prop` + team as `playerName`).
  */
+/** Books / feeds mix middle dot, bullet, and spacing — normalize before parsing. */
+function normalizePropSeparators(selection: string): string {
+  return String(selection ?? "")
+    .replace(/\s*[·•]\s*/g, " · ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function tailAfterPlayerDot(selection: string): string {
-  if (!selection.includes(" · ")) return "";
-  return selection.split(" · ").slice(1).join(" · ").trim().toLowerCase();
+  const norm = normalizePropSeparators(selection);
+  if (!norm.includes(" · ")) return "";
+  return norm.split(" · ").slice(1).join(" · ").trim().toLowerCase();
+}
+
+function selectionLooksLikeStatPlayerProp(selection: string): boolean {
+  const norm = normalizePropSeparators(selection);
+  const low = norm.toLowerCase();
+  const tail = tailAfterPlayerDot(norm);
+  if (norm.includes(" · ")) {
+    if (
+      (/\bover\b|\bunder\b/.test(tail) && /\d/.test(tail)) ||
+      /\(yes\)|\(no\)/.test(tail) ||
+      /\d\s*\+\s/.test(tail)
+    ) {
+      return true;
+    }
+  }
+  return (
+    (/\bover\b|\bunder\b/.test(low) && /\d/.test(norm)) || /\(yes\)|\(no\)/.test(low) || /\d\s*\+\s/.test(low)
+  );
+}
+
+/** When `playerName` is blank, take text before Over/Under / tier / HR yes-no. */
+function probablePlayerNameFromSelection(selection: string): string {
+  const norm = normalizePropSeparators(selection);
+  const hr = norm.match(/^(.+?)\s+·\s+to hit a home run\s*\(/i);
+  if (hr) return hr[1]!.trim();
+  const ou = norm.match(/^(.+?)\s+·\s+(over|under)\s+/i);
+  if (ou) return ou[1]!.trim();
+  const loose = norm.match(/^(.+?)\s+(over|under)\s+\d/i);
+  return loose?.[1]?.trim() ?? "";
 }
 
 export function isLegibleSportsbookPlayerProp(
@@ -79,17 +117,23 @@ export function isLegibleSportsbookPlayerProp(
 ): boolean {
   if (!isPlayerPropMarketType(m.marketType) || !isSportsbookLineSource(m.source)) return false;
 
-  /** Shaped `player_*` rows from The Rundown affiliate feed (already normalized in ingest). */
+  const sel = normalizePropSeparators(m.selection);
+
+  /** Shaped player rows from The Rundown feed (`rundown` or `rundown:bookId`, `player_*` or umbrella `player_prop`). */
+  const src = String(m.source ?? "").toLowerCase();
   const rundownShaped =
-    /^rundown:/i.test(String(m.source)) &&
+    (src === "rundown" || /^rundown:/i.test(String(m.source))) &&
     Boolean(m.statKey) &&
-    /^player_/i.test(String(m.marketType));
+    (m.marketType === "player_prop" || /^player_/i.test(String(m.marketType)));
   if (rundownShaped) {
-    const tail = tailAfterPlayerDot(m.selection);
+    const tail = tailAfterPlayerDot(sel);
     const tailOk =
       Boolean(tail) &&
       ((/\bover\b|\bunder\b/.test(tail) && /\d/.test(tail)) || /\(yes\)|\(no\)/.test(tail) || /\d\s*\+\s/.test(tail));
-    const pn = normTeamOrPlayerLabel(String(m.playerName ?? ""));
+    let pn = normTeamOrPlayerLabel(String(m.playerName ?? ""));
+    if (pn.split(/\s+/).filter(Boolean).length < 2) {
+      pn = normTeamOrPlayerLabel(probablePlayerNameFromSelection(sel));
+    }
     if (tailOk && pn.split(/\s+/).filter(Boolean).length >= 2) {
       if (!game) return true;
       const ht = normTeamOrPlayerLabel(game.homeTeam);
@@ -98,23 +142,33 @@ export function isLegibleSportsbookPlayerProp(
     }
   }
 
-  const low = m.selection.toLowerCase();
-  const tail = tailAfterPlayerDot(m.selection);
-  if (m.selection.includes(" · ")) {
+  const tail = tailAfterPlayerDot(sel);
+  if (sel.includes(" · ")) {
     if (
       (/\bover\b|\bunder\b/.test(tail) && /\d/.test(tail)) ||
       /\(yes\)|\(no\)/.test(tail) ||
       /\d\s*\+\s/.test(tail)
     ) {
-      // Odds API rows: "Name · Over 0.5 Hits" — reject "Team · +1.5" style tails.
+      let pn = normTeamOrPlayerLabel(String(m.playerName ?? ""));
+      if (pn.split(/\s+/).filter(Boolean).length < 2) {
+        pn = normTeamOrPlayerLabel(probablePlayerNameFromSelection(sel));
+      }
+      if (!pn || pn.split(/\s+/).filter(Boolean).length < 2) return false;
+      if (game) {
+        const ht = normTeamOrPlayerLabel(game.homeTeam);
+        const at = normTeamOrPlayerLabel(game.awayTeam);
+        if (pn === ht || pn === at) return false;
+      }
       return true;
     }
   }
-  const statish =
-    (/\bover\b|\bunder\b/.test(low) && /\d/.test(m.selection)) || /\(yes\)|\(no\)/.test(low) || /\d\s*\+\s/.test(low);
+  const statish = selectionLooksLikeStatPlayerProp(sel);
   if (!statish || !m.statKey) return false;
-  const pn = normTeamOrPlayerLabel(String(m.playerName ?? ""));
-  if (!pn) return false;
+  let pn = normTeamOrPlayerLabel(String(m.playerName ?? ""));
+  if (pn.split(/\s+/).filter(Boolean).length < 2) {
+    pn = normTeamOrPlayerLabel(probablePlayerNameFromSelection(sel));
+  }
+  if (!pn || pn.split(/\s+/).filter(Boolean).length < 2) return false;
   if (game) {
     const ht = normTeamOrPlayerLabel(game.homeTeam);
     const at = normTeamOrPlayerLabel(game.awayTeam);
@@ -123,12 +177,14 @@ export function isLegibleSportsbookPlayerProp(
   return true;
 }
 
-/** Apply {@link isLegibleSportsbookPlayerProp} to player rows; pass through all non-player markets. */
+/** Player props: sportsbook-priced rows only (Odds API keys, `rundown:*` affiliates, etc.). */
 export function filterLegiblePlayerPropsForSlate(markets: Market[], games: GameCard[]): Market[] {
   const byId = new Map(games.map((g) => [g.id, g]));
   return markets.filter((m) => {
     if (!isPlayerPropMarketType(m.marketType)) return true;
-    return isLegibleSportsbookPlayerProp(m, byId.get(m.gameId));
+    const g = byId.get(m.gameId);
+    if (isSportsbookLineSource(m.source)) return isLegibleSportsbookPlayerProp(m, g);
+    return false;
   });
 }
 
