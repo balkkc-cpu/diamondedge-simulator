@@ -78,14 +78,20 @@ export default function BetBuilderPage() {
 
   const forGame = useMemo(() => (data?.allMarkets ?? []).filter((m) => m.gameId === gameId), [data, gameId]);
   const sportsbookForGame = useMemo(() => forGame.filter((m) => isSportsbookLineSource(m.source)), [forGame]);
-  const lineMarkets = useMemo(
-    () => sportsbookForGame.filter((m) => !isPlayerPropMarketType(m.marketType)),
-    [sportsbookForGame]
-  );
+  /** Book lines first; if feeds are empty (e.g. Rundown 429 + no Odds key), show model game lines so the board is still usable. */
+  const lineMarkets = useMemo(() => {
+    const fromBook = sportsbookForGame.filter((m) => !isPlayerPropMarketType(m.marketType));
+    if (fromBook.length) return fromBook;
+    return forGame.filter((m) => m.source === "model" && !isPlayerPropMarketType(m.marketType));
+  }, [forGame, sportsbookForGame]);
   const playerMarkets = useMemo(
     () => sportsbookForGame.filter((m) => isPlayerPropMarketType(m.marketType)),
     [sportsbookForGame]
   );
+  const usingModelGameLines = useMemo(() => {
+    const bookGameLines = sportsbookForGame.filter((m) => !isPlayerPropMarketType(m.marketType));
+    return bookGameLines.length === 0 && lineMarkets.length > 0;
+  }, [sportsbookForGame, lineMarkets]);
   const oddsDebug = data?.oddsDebug;
 
   const playerPropsEmptyHint = useMemo(() => {
@@ -248,7 +254,15 @@ export default function BetBuilderPage() {
         </div>
 
         {(marketFilter === "all" || marketFilter === "lines") && (
-          <GameLinesRow markets={lineMarkets} onAdd={addBet} />
+          <div className="space-y-2">
+            {usingModelGameLines ? (
+              <p className="rounded-md border border-sky-800/60 bg-sky-950/30 px-2 py-1.5 text-[11px] text-sky-200/95">
+                Live book game lines are not on the wire for this game right now. Showing simulated lines from the same
+                engine as the rest of the app so you can still build slips — not sportsbook prices.
+              </p>
+            ) : null}
+            <GameLinesRow markets={lineMarkets} onAdd={addBet} />
+          </div>
         )}
 
         {(marketFilter === "all" || marketFilter === "players_tabs") && (

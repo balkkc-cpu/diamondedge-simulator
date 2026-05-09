@@ -303,6 +303,17 @@ function mergeBoardsPreferPrimary(primary: Market[], secondary: Market[]): Marke
   return [...byKey.values()];
 }
 
+/** Simulated markets per game (ML, RL, total, etc.); used when retail feeds are empty so the UI never has zero rows. */
+function modelSlateBaseline(games: GameCard[]): Market[] {
+  if (!games.length) return [];
+  return games.flatMap((g) => generateMarketsForGame(g));
+}
+
+/** Book-priced rows win on key clash; model baseline fills missing legs (Rundown path). */
+function mergeFeedsOverModelBaseline(feedRows: Market[], games: GameCard[]): Market[] {
+  return mergeBoardsPreferPrimary(feedRows, modelSlateBaseline(games));
+}
+
 function baselineBookAmericanForProp(m: Market): number | null {
   if (!isPlayerPropMarketType(m.marketType)) return null;
   const stat = String(
@@ -435,7 +446,7 @@ export async function getDailySchedule(): Promise<GameCard[]> {
     const data = await scheduleJson(`${MLB_STATS_API}/schedule?sportId=1&date=${today}&hydrate=team,probablePitcher`);
     const dates = data.dates?.[0]?.games ?? [];
     if (!dates.length) return mockGames;
-    return dates.map((g: any): GameCard => {
+    const rows = dates.map((g: any): GameCard => {
       const detailed = String(g.status?.detailedState ?? "");
       const delayInfo =
         /delay|susp|ppd|postponed|cancel/i.test(detailed) || String(g.status?.reason ?? "").length > 2
@@ -461,6 +472,7 @@ export async function getDailySchedule(): Promise<GameCard[]> {
         delayInfo
       };
     });
+    return rows.length ? rows : mockGames;
   } catch {
     return mockGames;
   }
@@ -474,12 +486,14 @@ export async function getOddsMarkets(gameId: string): Promise<Market[]> {
 export async function getAllMarkets(): Promise<Market[]> {
   const provider = String(process.env.ODDS_PROVIDER ?? "").toLowerCase();
   if (provider === "rundown") {
-    const games = await getDailySchedule();
+    const gamesRaw = await getDailySchedule();
+    const games = gamesRaw.length ? gamesRaw : mockGames;
     const rundown = await fetchRundownMarketsForToday(games);
     const failover = await buildOddsApiFailoverBoard(games);
     if (!rundown.length) {
       const rundownDbg = getRundownDebugState();
-      const filled = await augmentRosterPlayerPropsWhereMissing(games, failover);
+      const withBaseline = mergeFeedsOverModelBaseline(failover, games);
+      const filled = await augmentRosterPlayerPropsWhereMissing(games, withBaseline);
       const out = filterLegiblePlayerPropsForSlate(filled, games);
       if (
         process.env.ODDS_API_KEY?.trim() &&
@@ -498,7 +512,8 @@ export async function getAllMarkets(): Promise<Market[]> {
       filterOutNonBookPlayerProps(await mergeRundownRetailPlayerProps(applyRundownRetailSlate(sportsbook), games)),
       games
     );
-    const merged = mergeBoardsPreferPrimary(primary, failover);
+    const bookMerged = mergeBoardsPreferPrimary(primary, failover);
+    const merged = mergeFeedsOverModelBaseline(bookMerged, games);
     const filled = await augmentRosterPlayerPropsWhereMissing(games, merged);
     return filterLegiblePlayerPropsForSlate(filled, games);
   }
