@@ -116,11 +116,11 @@ function uniqueSorted(nums: number[]): number[] {
 
 /**
  * Next.js `fetch` revalidate for The Rundown HTTP calls (seconds).
- * Default 60s for near-real-time board updates; override with RUNDOWN_FETCH_REVALIDATE_SECONDS.
+ * Default 900s (15m) to avoid burst 429s when many users/dashboard polls hit cold workers; override with RUNDOWN_FETCH_REVALIDATE_SECONDS.
  */
 export function rundownHttpRevalidateSeconds(): number {
   const raw = process.env.RUNDOWN_FETCH_REVALIDATE_SECONDS ?? process.env.RUNDOWN_REVALIDATE_SECONDS;
-  if (raw == null || String(raw).trim() === "") return 60;
+  if (raw == null || String(raw).trim() === "") return 900;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 60) return 60;
   return Math.min(Math.floor(n), 86_400 * 7);
@@ -137,10 +137,16 @@ export async function fetchRundownMarketsCatalogForSportDate(
     `https://therundown.io/api/v2/sports/${encodeURIComponent(sportId)}/markets/${encodeURIComponent(dateYmd)}` +
     `?offset=${encodeURIComponent(offset)}`;
 
-  const res = await fetch(url, {
+  const init = {
     headers: rundownRequestHeaders(apiKey),
     next: { revalidate: rundownHttpRevalidateSeconds() }
-  });
+  } as const;
+  let res = await fetch(url, init);
+  const delays = [2200, 5200];
+  for (let i = 0; i < delays.length && (res.status === 429 || res.status === 503); i++) {
+    await new Promise((r) => setTimeout(r, delays[i]));
+    res = await fetch(url, init);
+  }
   if (!res.ok) return { defs: [], httpStatus: res.status };
   let data: Record<string, unknown>;
   try {

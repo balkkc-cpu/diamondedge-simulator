@@ -26,6 +26,13 @@ export default function BetBuilderPage() {
     allMarkets: Market[];
     oddsProvider?: "rundown" | "the_odds_api";
     oddsDebug?: OddsDebugState | RundownDebugState;
+    boardStats?: {
+      slateGames: number;
+      markets: number;
+      bookPlayerProps: number;
+      orphanBookPlayerProps: number;
+      bookPlayerPropsByGameId: Record<string, number>;
+    };
   } | null>(null);
   const [gameId, setGameId] = useState<string>("mock-game-001");
   const [marketFilter, setMarketFilter] = useState<"all" | "lines" | "players_tabs" | "players_columns">("all");
@@ -81,6 +88,21 @@ export default function BetBuilderPage() {
   );
   const oddsDebug = data?.oddsDebug;
 
+  const playerPropsEmptyHint = useMemo(() => {
+    const totalBook = data?.boardStats?.bookPlayerProps ?? 0;
+    const fromRundown = data?.oddsProvider === "rundown";
+    const rd = fromRundown ? (data?.oddsDebug as RundownDebugState | undefined) : undefined;
+    const rundown429 = rd?.status === "http_error" && rd?.httpStatus === 429;
+
+    if (totalBook > 0) {
+      return "Sportsbook player props exist for other games on today’s slate, but none are attached to this game yet (often a temporary event↔game mapping gap right after a rate-limited Rundown fetch). Try another matchup or refresh in a few minutes.";
+    }
+    if (fromRundown && rundown429) {
+      return "The Rundown API returned HTTP 429 (rate limit). This deployment now waits and retries longer, and caches Rundown HTTP responses longer by default. If props stay empty, set ODDS_API_KEY so The Odds API can serve the board when Rundown fails, or raise RUNDOWN_FETCH_REVALIDATE_SECONDS (for example 1800–3600) in Vercel.";
+    }
+    return "Live sportsbook player props are temporarily unavailable from the current feed. No synthetic fallback props are shown.";
+  }, [data?.boardStats?.bookPlayerProps, data?.oddsDebug, data?.oddsProvider]);
+
   const oddsBadge = useMemo(() => {
     if (!oddsDebug) return null;
     const fromRundown = data?.oddsProvider === "rundown";
@@ -91,6 +113,12 @@ export default function BetBuilderPage() {
     if (oddsDebug.status === "ok" && rd?.boardSource === "stale_cache") {
       return {
         label: "RUNDOWN RATE LIMITED — USING CACHED BOARD",
+        tone: "text-amber-300 border-amber-700/50 bg-amber-950/30"
+      };
+    }
+    if (oddsDebug.status === "ok" && rd?.boardSource === "odds_api_fallback") {
+      return {
+        label: "RUNDOWN UNAVAILABLE — ODDS API BACKUP",
         tone: "text-amber-300 border-amber-700/50 bg-amber-950/30"
       };
     }
@@ -228,10 +256,7 @@ export default function BetBuilderPage() {
             {playerMarkets.length ? (
               <PlayerTabsBoard markets={playerMarkets} onAdd={addBet} />
             ) : (
-              <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-3 text-sm text-amber-200">
-                Live sportsbook player props are temporarily unavailable from the current feed (for example, provider rate-limit). No synthetic
-                fallback props are shown.
-              </div>
+              <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-3 text-sm text-amber-200">{playerPropsEmptyHint}</div>
             )}
           </div>
         )}
@@ -241,10 +266,7 @@ export default function BetBuilderPage() {
             {playerMarkets.length ? (
               <PlayerPropColumns markets={playerMarkets} onAdd={addBet} />
             ) : (
-              <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-3 text-sm text-amber-200">
-                Live sportsbook player props are temporarily unavailable from the current feed (for example, provider rate-limit). No synthetic
-                fallback props are shown.
-              </div>
+              <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-3 text-sm text-amber-200">{playerPropsEmptyHint}</div>
             )}
           </div>
         )}

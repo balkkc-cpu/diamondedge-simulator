@@ -19,8 +19,8 @@ export type RundownDebugState = {
   detail?: string;
   /** Present when `status` is `http_error` (e.g. upstream 429 rate limit). */
   httpStatus?: number;
-  /** Live fetch vs last-good snapshot when Rundown rate-limits or errors. */
-  boardSource?: "live" | "stale_cache";
+  /** Live fetch vs last-good snapshot when Rundown rate-limits or errors; `odds_api_fallback` when the board is still served from The Odds API. */
+  boardSource?: "live" | "stale_cache" | "odds_api_fallback";
   updatedAt: string;
 };
 
@@ -36,6 +36,16 @@ function setRundownDebug(state: Omit<RundownDebugState, "updatedAt">) {
 
 export function getRundownDebugState(): RundownDebugState {
   return lastRundownDebug;
+}
+
+/** After `getAllMarkets` merges Odds API failover, clear misleading `http_error` when the user still has book lines. */
+export function markRundownBoardServedFromOddsApiFallback(prev: Pick<RundownDebugState, "detail" | "httpStatus">) {
+  setRundownDebug({
+    status: "ok",
+    boardSource: "odds_api_fallback",
+    httpStatus: prev.httpStatus,
+    detail: `Rundown feed failed${prev.httpStatus != null ? ` (HTTP ${prev.httpStatus})` : ""}; board uses The Odds API where configured.`
+  });
 }
 
 /** Last successful Rundown board for this server instance (same ET date + sport + affiliate scope). */
@@ -487,9 +497,11 @@ async function fetchRundownEventsPage(
     });
   }
 
+  /** Two backoff steps (~7s) — enough for transient 429 without blowing serverless budgets. */
+  const backoffMs = [2200, 5200];
   let res = await doFetch();
-  if (res.status === 429 || res.status === 503) {
-    await new Promise((r) => setTimeout(r, 3200));
+  for (let i = 0; i < backoffMs.length && (res.status === 429 || res.status === 503); i++) {
+    await new Promise((r) => setTimeout(r, backoffMs[i]));
     res = await doFetch();
   }
   if (!res.ok) return { ok: false, events: [], status: res.status };

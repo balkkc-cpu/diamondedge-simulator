@@ -14,7 +14,7 @@ import {
   mergeFanDuelPrices,
   rundownMarketsToSyntheticOddsEvents
 } from "./theOddsFanDuel";
-import { fetchRundownMarketsForToday } from "./theRundown";
+import { fetchRundownMarketsForToday, getRundownDebugState, markRundownBoardServedFromOddsApiFallback } from "./theRundown";
 import { applyRundownRetailSlate } from "./retailBoard";
 import { GameCard, GameDetail, Market, PlayerCard } from "./types";
 
@@ -478,8 +478,20 @@ export async function getAllMarkets(): Promise<Market[]> {
     const rundown = await fetchRundownMarketsForToday(games);
     const failover = await buildOddsApiFailoverBoard(games);
     if (!rundown.length) {
+      const rundownDbg = getRundownDebugState();
       const filled = await augmentRosterPlayerPropsWhereMissing(games, failover);
-      return filterLegiblePlayerPropsForSlate(filled, games);
+      const out = filterLegiblePlayerPropsForSlate(filled, games);
+      if (
+        process.env.ODDS_API_KEY?.trim() &&
+        (rundownDbg.status === "http_error" || rundownDbg.status === "no_events") &&
+        out.some((m) => isPlayerPropMarketType(m.marketType) && isSportsbookLineSource(m.source))
+      ) {
+        markRundownBoardServedFromOddsApiFallback({
+          detail: rundownDbg.detail,
+          httpStatus: rundownDbg.httpStatus
+        });
+      }
+      return out;
     }
     const sportsbook = rundown.filter((m) => isSportsbookLineSource(m.source));
     const primary = filterLegiblePlayerPropsForSlate(
