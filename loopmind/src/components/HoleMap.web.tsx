@@ -58,7 +58,10 @@ export function HoleMap(props: HoleMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const playerMarkerRef = useRef<any>(null);
+  const playerHaloRef = useRef<any>(null);
+  const remainingLineRef = useRef<any>(null);
   const [failed, setFailed] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
 
   const tee = hole.tees.find((t) => t.id === selectedTeeId) ?? hole.tees[0];
   const teeGeo = tee?.geo;
@@ -140,11 +143,26 @@ export function HoleMap(props: HoleMapProps) {
         ]);
         hole.hazards.forEach((h) => h.geo && bounds.extend([h.geo.lat, h.geo.lng]));
         map.fitBounds(bounds, { padding: [28, 28] });
+
+        // The container may not have its final size on first paint (react-native-web
+        // layout timing), which can leave tiles unrendered (black). Recompute size
+        // shortly after mount so Esri tiles load reliably.
+        setTimeout(() => {
+          if (!cancelled && mapRef.current) {
+            mapRef.current.invalidateSize();
+            mapRef.current.fitBounds(bounds, { padding: [28, 28] });
+          }
+        }, 300);
+        if (!cancelled) setMapReady(true);
       })
       .catch(() => !cancelled && setFailed(true));
 
     return () => {
       cancelled = true;
+      setMapReady(false);
+      playerMarkerRef.current = null;
+      playerHaloRef.current = null;
+      remainingLineRef.current = null;
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -154,15 +172,29 @@ export function HoleMap(props: HoleMapProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hole.number, selectedTeeId, teeGeo?.lat, teeGeo?.lng, greenGeo?.lat, greenGeo?.lng]);
 
-  // Update the live player marker.
+  // Update the live player marker + remaining-distance line (clearly shows
+  // progress as the player walks). Runs once the map is ready and on each move.
   useEffect(() => {
     const L = window.L;
     const map = mapRef.current;
-    if (!L || !map || !playerGeo) return;
+    if (!L || !map || !mapReady || !playerGeo) return;
     const pos: [number, number] = [playerGeo.lat, playerGeo.lng];
+
+    if (!playerHaloRef.current) {
+      playerHaloRef.current = L.circleMarker(pos, {
+        radius: 16,
+        color: "#2BD576",
+        weight: 2,
+        fillColor: "#2BD576",
+        fillOpacity: 0.2,
+      }).addTo(map);
+    } else {
+      playerHaloRef.current.setLatLng(pos);
+    }
+
     if (!playerMarkerRef.current) {
       playerMarkerRef.current = L.circleMarker(pos, {
-        radius: 8,
+        radius: 9,
         color: "#ffffff",
         weight: 3,
         fillColor: "#2BD576",
@@ -171,8 +203,21 @@ export function HoleMap(props: HoleMapProps) {
     } else {
       playerMarkerRef.current.setLatLng(pos);
     }
+
+    if (greenGeo) {
+      const line: [number, number][] = [pos, [greenGeo.lat, greenGeo.lng]];
+      if (!remainingLineRef.current) {
+        remainingLineRef.current = L.polyline(line, {
+          color: "#ffd60a",
+          weight: 3,
+          opacity: 0.95,
+        }).addTo(map);
+      } else {
+        remainingLineRef.current.setLatLngs(line);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerGeo?.lat, playerGeo?.lng]);
+  }, [playerGeo?.lat, playerGeo?.lng, mapReady]);
 
   if (noGeo || failed) {
     // Geometry or Leaflet unavailable — fall back to the SVG renderer.
