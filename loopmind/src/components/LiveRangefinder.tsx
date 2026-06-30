@@ -185,6 +185,7 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
       weaknessArea: analysis.hasData ? analysis.topWeakness.area : undefined,
       weaknessLostStrokes: analysis.topWeakness.lostStrokes,
       holePar: hole.par,
+      nonce: String(seq),
     };
     const base = recommendShot(input);
 

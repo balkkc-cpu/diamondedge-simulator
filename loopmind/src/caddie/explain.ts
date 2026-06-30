@@ -11,6 +11,8 @@ export interface ExplainContext {
   weaknessArea?: PracticeArea;
   weaknessLostStrokes?: number;
   holePar?: number;
+  /** Changes each time you ask, so re-asking rephrases the advice. */
+  nonce?: string;
 }
 
 const WEAKNESS_TIP: Record<PracticeArea, string> = {
@@ -21,53 +23,90 @@ const WEAKNESS_TIP: Record<PracticeArea, string> = {
   penalties: "take the trouble completely out of play — no big numbers today",
 };
 
-function windPhrase(input: RecommendationInput): string {
+function windDescriptor(input: RecommendationInput): string {
   if (!input.weather) return "";
   const w = input.weather;
   if (w.windSpeedMph < 4) return "barely any wind";
-  return `${w.windSpeedMph} mph wind`;
+  const note = w.windSpeedMph >= 14 ? "a stiff" : w.windSpeedMph >= 8 ? "a steady" : "a light";
+  return `${note} ${w.windSpeedMph} mph wind`;
 }
 
-/** Build the always-available, personalized, varied caddie explanation. */
+/** Which two in-bag clubs bracket the playing yardage, for "between clubs" talk. */
+function bracketClubs(input: RecommendationInput, yards: number): { shorter?: string; longer?: string } {
+  const bag = input.clubs
+    .filter((c) => c.inBag && c.id !== "putter" && c.distanceYards > 0)
+    .sort((a, b) => a.distanceYards - b.distanceYards);
+  let shorter: string | undefined;
+  let longer: string | undefined;
+  for (const c of bag) {
+    if (c.distanceYards <= yards) shorter = c.label;
+    if (c.distanceYards >= yards && !longer) longer = c.label;
+  }
+  return { shorter, longer };
+}
+
+/** Build the always-available, personalized, dynamic caddie explanation. */
 export function buildRuleExplanation(
   input: RecommendationInput,
   rec: CaddieRecommendation,
   ctx: ExplainContext = {},
 ): string {
-  const seed = `${ctx.seed ?? "guest"}|${input.targetYards}|${input.lie}|${rec.primary.club}|${input.riskTolerance}`;
+  const v = `${ctx.seed ?? "guest"}|${input.targetYards}|${input.lie}|${rec.primary.club}|${input.riskTolerance}|${ctx.nonce ?? ""}`;
   const persona = personaForUser(ctx.seed);
-  const opener = seededPick(persona.openers, seed + "o");
-  const connector = seededPick(persona.connectors, seed + "c");
-  const signoff = seededPick(persona.signoffs, seed + "s");
+  const opener = seededPick(persona.openers, v + "o");
+  const connector = seededPick(persona.connectors, v + "c");
+  const signoff = seededPick(persona.signoffs, v + "s");
 
-  const parts: string[] = [];
-
-  // 1) Situation, in the caddie's voice.
-  const wp = windPhrase(input);
   const pin = input.pinNote ?? "middle";
-  parts.push(
-    `${opener} You've got ${input.targetYards} to the ${pin}${wp ? `, ${wp}` : ""} — it's playing like ${rec.playsLikeYards}.`,
-  );
+  const wind = windDescriptor(input);
+  const carry = rec.primary.carryYards;
+  const plays = rec.playsLikeYards;
+  const delta = plays - input.targetYards; // + plays longer
 
-  // 2) The club, referencing the player's own carry number from their bag.
+  // 1) Situation — varied phrasings, mentioning the real adjustment when notable.
+  const adjustClause =
+    Math.abs(delta) >= 4
+      ? ` (${delta > 0 ? "plays " + delta + " longer" : "plays " + Math.abs(delta) + " shorter"} once you factor it all in)`
+      : "";
+  const situationBank = [
+    `${opener} You've got ${input.targetYards} to the ${pin}${wind ? `, ${wind}` : ""} — it's a ${plays}-yard shot${adjustClause}.`,
+    `${opener} ${plays} is your real number here: ${input.targetYards} on the card${wind ? ` with ${wind}` : ""}${adjustClause}.`,
+    `${opener} ${input.targetYards} to the ${pin}${wind ? `, ${wind}` : ""}. Played honestly that's about ${plays}${adjustClause}.`,
+  ];
+  const parts: string[] = [seededPick(situationBank, v + "1")];
+
+  // 2) Club + swing feel, referencing the player's own carry and club gapping.
   if (rec.primary.label.toLowerCase().includes("lay up")) {
-    parts.push(
-      `With your game, the smart play is to lay up with the ${rec.primary.clubLabel} and leave a full wedge. ${connector}`,
-    );
+    const layBank = [
+      `Take the trouble out of play — lay up with the ${rec.primary.clubLabel} and leave a full wedge. ${connector}`,
+      `No hero stuff: ${rec.primary.clubLabel} to your favorite wedge number, then attack from there. ${connector}`,
+    ];
+    parts.push(seededPick(layBank, v + "2"));
   } else {
-    const carry = rec.primary.carryYards;
-    const carryNote = carry > 0 ? ` — that's about your ${carry}-yard club` : "";
-    parts.push(`The ${rec.primary.clubLabel} is the number${carryNote}. ${rec.targetLine} ${connector}`);
+    const gap = carry > 0 ? plays - carry : 0;
+    let feel: string;
+    if (carry <= 0) feel = `the ${rec.primary.clubLabel} is the club`;
+    else if (gap >= 6) {
+      const { longer } = bracketClubs(input, plays);
+      feel = longer && longer !== rec.primary.clubLabel
+        ? `it's between clubs — I'd take the ${rec.primary.clubLabel} (your ${carry}) and make a confident swing rather than the ${longer}`
+        : `step on the ${rec.primary.clubLabel} a touch — it's your ${carry}-yard club and you've got ${gap} to make up`;
+    } else if (gap <= -6) {
+      feel = `smooth ${rec.primary.clubLabel} — that's your ${carry}-yard club, so take something off it, don't force it`;
+    } else {
+      feel = `a stock ${rec.primary.clubLabel} — that's right at your ${carry}-yard number`;
+    }
+    parts.push(`The play is ${feel}. ${rec.targetLine} ${connector}`);
   }
 
-  // 3) Safe miss + a personalized weakness tie-in when we have round data.
-  let line3 = `Miss it ${rec.safeMiss.toLowerCase()}`;
+  // 3) Safe miss + personalized weakness tie-in when we have round data.
+  let line3 = `Miss it ${rec.safeMiss.toLowerCase().replace(/\.$/, "")}`;
   if (ctx.weaknessArea && (ctx.weaknessLostStrokes ?? 0) > 0.3) {
     line3 += `, and ${WEAKNESS_TIP[ctx.weaknessArea]}`;
   }
-  parts.push(line3.replace(/\.$/, "") + ".");
+  parts.push(line3 + ".");
 
-  // 4) Expected result + persona sign-off.
+  // 4) Expected result + persona sign-off (occasionally swap order for variety).
   parts.push(`${rec.expectedResult} ${signoff}`);
 
   return parts.join(" ");
