@@ -19,11 +19,11 @@ const SYSTEM_PROMPT =
   "Be human, encouraging and concrete — reference the exact number, club, wind, where to aim and the smart miss. " +
   "Do not invent data you were not given. Vary your wording. No markdown, no lists.";
 
-async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+async function fetchWithTimeout(url: string, opts: RequestInit, ms: number): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   try {
-    return await p;
+    return await fetch(url, { ...opts, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -32,19 +32,23 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 async function tryOpenAI(facts: string): Promise<string | null> {
   if (!isOpenAIConfigured) return null;
   try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.openaiApiKey}` },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.7,
-        max_tokens: 160,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: facts },
-        ],
-      }),
-    });
+    const res = await fetchWithTimeout(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.openaiApiKey}` },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          temperature: 0.7,
+          max_tokens: 160,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: facts },
+          ],
+        }),
+      },
+      15000,
+    );
     if (!res.ok) return null;
     const json = await res.json();
     return (json?.choices?.[0]?.message?.content as string | undefined)?.trim() || null;
@@ -53,26 +57,20 @@ async function tryOpenAI(facts: string): Promise<string | null> {
   }
 }
 
-/** Free, keyless LLM (Pollinations). Returns plain text. */
+/**
+ * Free, keyless LLM (Pollinations). Uses the GET endpoint with a `referrer`,
+ * which works from browsers (the POST endpoint is gated by Cloudflare Turnstile
+ * for browser traffic). Returns plain text.
+ */
 async function tryPollinations(facts: string): Promise<string | null> {
   try {
-    const res = await fetch("https://text.pollinations.ai/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "openai",
-        temperature: 0.8,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: facts },
-        ],
-      }),
-    });
+    const prompt = `${SYSTEM_PROMPT}\n\nSHOT FACTS:\n${facts}\n\nNow give the caddie's spoken advice.`;
+    const url = `https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai&referrer=loopmind`;
+    const res = await fetchWithTimeout(url, { method: "GET" }, 20000);
     if (!res.ok) return null;
     const text = (await res.text())?.trim();
     if (!text || text.length < 8) return null;
-    // Guard against occasional error/JSON payloads.
-    if (text.startsWith("{") || text.toLowerCase().includes("error")) return null;
+    if (text.startsWith("{") || text.startsWith("<") || /^\s*(error|forbidden)/i.test(text)) return null;
     return text;
   } catch {
     return null;
@@ -80,7 +78,7 @@ async function tryPollinations(facts: string): Promise<string | null> {
 }
 
 export async function rewriteAsCaddie(facts: string): Promise<string | null> {
-  const viaOpenAI = await withTimeout(tryOpenAI(facts), 15000).catch(() => null);
+  const viaOpenAI = await tryOpenAI(facts);
   if (viaOpenAI) return viaOpenAI;
-  return withTimeout(tryPollinations(facts), 18000).catch(() => null);
+  return tryPollinations(facts);
 }
