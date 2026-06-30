@@ -14,7 +14,7 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useRoundStore } from "@/store/useRoundStore";
 import { recommendShot } from "@/caddie/engine";
-import { withExplanation } from "@/caddie/explain";
+import { aiCaddieText, buildRuleExplanation } from "@/caddie/explain";
 import { analyzeRounds } from "@/caddie/practice";
 import { personaForUser } from "@/caddie/persona";
 import { getCurrentPosition } from "@/services/location";
@@ -74,6 +74,7 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
   const [weather, setWeather] = useState<Weather | undefined>(undefined);
   const [rec, setRec] = useState<CaddieRecommendation | null>(null);
   const [loading, setLoading] = useState(false);
+  const [refining, setRefining] = useState(false);
 
   const [liveMode, setLiveMode] = useState(false);
   const live = useLiveLocation();
@@ -164,18 +165,32 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
     pinNote: pin,
   });
 
+  const adviceSeq = useRef(0);
   const getAdvice = async () => {
+    const seq = ++adviceSeq.current;
     setLoading(true);
-    const base = recommendShot(buildInput());
-    const withText = await withExplanation(buildInput(), base, {
+    const input = buildInput();
+    const ctx = {
       seed: email,
       weaknessArea: analysis.hasData ? analysis.topWeakness.area : undefined,
       weaknessLostStrokes: analysis.topWeakness.lostStrokes,
       holePar: hole.par,
-    });
-    setRec(withText);
+    };
+    const base = recommendShot(input);
+
+    // Phase 1: show an instant personalized draft immediately.
+    const draft = { ...base, explanation: buildRuleExplanation(input, base, ctx), aiEnhanced: false };
+    setRec(draft);
     setLoading(false);
-    if (voiceEnabled && autoAnnounce) speak(withText.explanation);
+    setRefining(true);
+
+    // Phase 2: upgrade to genuinely AI-generated text when it arrives.
+    const ai = await aiCaddieText(input, base, ctx);
+    if (seq !== adviceSeq.current) return; // a newer request superseded this one
+    setRefining(false);
+    const finalRec = ai ? { ...base, explanation: ai, aiEnhanced: true } : draft;
+    setRec(finalRec);
+    if (voiceEnabled && autoAnnounce) speak(finalRec.explanation);
   };
 
   const step = (delta: number) => {
@@ -347,6 +362,11 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
       {rec ? (
         <>
           <RecommendationCard rec={rec} />
+          {refining ? (
+            <Text style={[styles.bagNote, { color: palette.primary }]}>
+              <Ionicons name="sparkles-outline" size={12} color={palette.primary} /> {persona.name} is refining this with AI…
+            </Text>
+          ) : null}
           <Button
             label={voiceEnabled ? "🔊 Hear advice again" : "Enable voice in Profile"}
             variant="secondary"

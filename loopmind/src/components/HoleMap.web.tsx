@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import Svg, { Circle, Line } from "react-native-svg";
+import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
 import { useTheme } from "@/theme/ThemeProvider";
 import { radius } from "@/theme/colors";
 import { SvgHoleMap, HoleMapProps } from "./SvgHoleMap";
@@ -79,6 +79,13 @@ export function HoleMap(props: HoleMapProps) {
   const greenPx = px(hole.green.center);
   const teePx = px(tee?.position ?? { x: 0.5, y: 0.9 });
 
+  // ForeFun-style range rings: 100 / 150 / 200 yds from the player.
+  const holeYds = hole.green.middleYards || tee?.yards || 400;
+  const pxPerYard = Math.hypot(greenPx.x - teePx.x, greenPx.y - teePx.y) / holeYds;
+  const rangeRings = [100, 150, 200]
+    .map((yds) => ({ yds, r: yds * pxPerYard }))
+    .filter((ring) => ring.r > 14 && ring.r < height * 0.95);
+
   // Create the base map + static hole layers once per hole/tee.
   useEffect(() => {
     let cancelled = false;
@@ -145,6 +152,24 @@ export function HoleMap(props: HoleMapProps) {
       {/* Live overlay: tee, green, hazards, remaining-distance line + player dot.
           Drawn from normalized hole coordinates so it tracks reliably. */}
       <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
+        {/* Range rings around the player (100/150/200 yds) */}
+        {rangeRings.map((ring) => (
+          <React.Fragment key={ring.yds}>
+            <Circle
+              cx={playerPx.x}
+              cy={playerPx.y}
+              r={ring.r}
+              fill="none"
+              stroke="#ffffff"
+              strokeOpacity={0.55}
+              strokeWidth={1}
+              strokeDasharray="4 5"
+            />
+            <SvgText x={playerPx.x} y={playerPx.y - ring.r - 3} fill="#ffffff" fontSize={10} fontWeight="700" textAnchor="middle">
+              {ring.yds}
+            </SvgText>
+          </React.Fragment>
+        ))}
         {/* Green target */}
         <Circle cx={greenPx.x} cy={greenPx.y} r={12} fill="#39d98a" fillOpacity={0.5} stroke="#ffffff" strokeWidth={2} />
         {/* Tee */}

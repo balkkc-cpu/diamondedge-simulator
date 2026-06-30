@@ -93,9 +93,18 @@ function factSheet(input: RecommendationInput, rec: CaddieRecommendation, ctx: E
     .join("\n");
 }
 
+/** Genuinely AI-generated caddie text (OpenAI or free Pollinations), or null. */
+export async function aiCaddieText(
+  input: RecommendationInput,
+  rec: CaddieRecommendation,
+  ctx: ExplainContext = {},
+): Promise<string | null> {
+  return rewriteAsCaddie(factSheet(input, rec, ctx));
+}
+
 /**
- * Returns a recommendation with the explanation filled in. Tries the OpenAI
- * layer first (if configured) and falls back to the personalized rule template.
+ * Returns a recommendation with the explanation filled in. Tries the AI layer
+ * first and falls back to the personalized rule template.
  */
 export async function withExplanation(
   input: RecommendationInput,
