@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useTheme } from "@/theme/ThemeProvider";
 import { radius } from "@/theme/colors";
-import { HoleMap as SvgHoleMap, HoleMapProps } from "./HoleMap";
+import { SvgHoleMap, HoleMapProps } from "./SvgHoleMap";
 
 /**
  * Web hole map: a REAL satellite map (Esri World Imagery) rendered with Leaflet,
@@ -76,7 +76,19 @@ export function HoleMap(props: HoleMapProps) {
           mapRef.current.remove();
           mapRef.current = null;
         }
-        const map = L.map(containerRef.current, { zoomControl: false, attributionControl: false });
+        // Fully non-interactive: the map is a rangefinder *view*, so it must not
+        // hijack page scroll / touch (otherwise content below it is unreachable).
+        const map = L.map(containerRef.current, {
+          zoomControl: false,
+          attributionControl: false,
+          dragging: false,
+          scrollWheelZoom: false,
+          doubleClickZoom: false,
+          touchZoom: false,
+          boxZoom: false,
+          keyboard: false,
+          tap: false,
+        });
         mapRef.current = map;
         L.tileLayer(ESRI_IMAGERY, { maxZoom: 21, maxNativeZoom: 19 }).addTo(map);
 
@@ -170,7 +182,7 @@ export function HoleMap(props: HoleMapProps) {
   return (
     <View style={[styles.wrap, { width, height, borderColor: palette.border }]}>
       <View ref={containerRef} style={{ width, height }} />
-      <View style={styles.badge} pointerEvents="none">
+      <View style={[styles.badge, { pointerEvents: "none" }]}>
         <Text style={styles.badgeText}>Satellite · live</Text>
       </View>
     </View>
