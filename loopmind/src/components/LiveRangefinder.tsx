@@ -75,6 +75,7 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
   const [rec, setRec] = useState<CaddieRecommendation | null>(null);
   const [loading, setLoading] = useState(false);
   const [refining, setRefining] = useState(false);
+  const [plan, setPlan] = useState<{ toTarget: number; toGreen: number } | null>(null);
 
   const [liveMode, setLiveMode] = useState(false);
   const live = useLiveLocation();
@@ -161,8 +162,8 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
       ? yardsBetween(liveCoord, hole.green.backGeo)
       : yardsLeft + 15;
 
-  const buildInput = () => ({
-    targetYards: yardsLeft,
+  const buildInput = (yards: number = yardsLeft) => ({
+    targetYards: yards,
     lie,
     skillLevel: profile.skillLevel,
     dominantHand: profile.dominantHand,
@@ -176,10 +177,10 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
   });
 
   const adviceSeq = useRef(0);
-  const getAdvice = async () => {
+  const getAdvice = async (overrideYards?: number) => {
     const seq = ++adviceSeq.current;
     setLoading(true);
-    const input = buildInput();
+    const input = buildInput(overrideYards ?? yardsLeft);
     const ctx = {
       seed: email,
       weaknessArea: analysis.hasData ? analysis.topWeakness.area : undefined,
@@ -299,7 +300,36 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
         )}
       </Card>
 
-      <HoleMap hole={hole} selectedTeeId={teeId} playerPosition={playerPosition} playerGeo={playerGeo} width={width - spacing.xl * 2} />
+      <HoleMap
+        hole={hole}
+        selectedTeeId={teeId}
+        playerPosition={playerPosition}
+        playerGeo={playerGeo}
+        width={width - spacing.xl * 2}
+        onTargetChange={(toTarget, toGreen) => setPlan({ toTarget, toGreen })}
+      />
+
+      {/* Shot planner — drag the target on the map (ForeFun-style) */}
+      {plan ? (
+        <Card title="Shot planner">
+          <View style={styles.planRow}>
+            <View style={styles.planStat}>
+              <Text style={[styles.planValue, { color: palette.primary }]}>{plan.toTarget}</Text>
+              <Text style={[styles.planLabel, { color: palette.muted }]}>CARRY TO TARGET</Text>
+            </View>
+            <Ionicons name="arrow-forward" size={16} color={palette.muted} />
+            <View style={styles.planStat}>
+              <Text style={[styles.planValue, { color: palette.text }]}>{plan.toGreen}</Text>
+              <Text style={[styles.planLabel, { color: palette.muted }]}>TARGET → GREEN</Text>
+            </View>
+          </View>
+          <Button
+            label={`Caddie this ${plan.toTarget}-yd shot`}
+            variant="secondary"
+            onPress={() => getAdvice(plan.toTarget)}
+          />
+        </Card>
+      ) : null}
 
       {/* Tee selector */}
       <View style={{ gap: spacing.sm }}>
@@ -436,4 +466,9 @@ const styles = StyleSheet.create({
   hazardYds: { fontSize: fontSize.sm },
   weather: { fontSize: fontSize.sm, textAlign: "center" },
   bagNote: { fontSize: fontSize.xs, textAlign: "center", lineHeight: 16 },
+  planRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-around", marginBottom: spacing.sm },
+  planStat: { alignItems: "center" },
+  planValue: { fontSize: fontSize.xl, fontWeight: "800" },
+  planLabel: { fontSize: fontSize.xs, letterSpacing: 0.5, marginTop: 2 },
 });
+

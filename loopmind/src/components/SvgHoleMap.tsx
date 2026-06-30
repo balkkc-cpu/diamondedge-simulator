@@ -14,6 +14,8 @@ export interface HoleMapProps {
   width: number;
   /** Aspect ratio (height = width * ratio). Holes are tall/portrait. */
   ratio?: number;
+  /** Fired as the draggable target moves (web satellite map only). */
+  onTargetChange?: (toTargetYds: number, targetToGreenYds: number) => void;
 }
 
 /**

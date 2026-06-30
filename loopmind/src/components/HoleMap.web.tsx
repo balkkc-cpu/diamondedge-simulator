@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+/* eslint-disable react-hooks/refs -- PanResponder gesture callbacks read refs at interaction time, not during render */
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { PanResponder, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
 import { useTheme } from "@/theme/ThemeProvider";
 import { radius } from "@/theme/colors";
@@ -57,7 +58,7 @@ interface PxPoint {
 }
 
 export function HoleMap(props: HoleMapProps) {
-  const { hole, selectedTeeId, playerPosition, width, ratio = 1.4 } = props;
+  const { hole, selectedTeeId, playerPosition, width, ratio = 1.4, onTargetChange } = props;
   const { palette } = useTheme();
   const height = width * ratio;
 
@@ -81,10 +82,49 @@ export function HoleMap(props: HoleMapProps) {
 
   // ForeFun-style range rings: 100 / 150 / 200 yds from the player.
   const holeYds = hole.green.middleYards || tee?.yards || 400;
-  const pxPerYard = Math.hypot(greenPx.x - teePx.x, greenPx.y - teePx.y) / holeYds;
+  const pxPerYard = Math.hypot(greenPx.x - teePx.x, greenPx.y - teePx.y) / holeYds || 1;
   const rangeRings = [100, 150, 200]
     .map((yds) => ({ yds, r: yds * pxPerYard }))
     .filter((ring) => ring.r > 14 && ring.r < height * 0.95);
+
+  // Draggable target (plan your shot — carry to target + target to green).
+  // Default to mid-fairway; only switches to a user-dragged spot once moved. The
+  // component is remounted per hole (keyed), so this resets naturally.
+  const defaultTarget: PxPoint = { x: (teePx.x + greenPx.x) / 2, y: (teePx.y + greenPx.y) / 2 };
+  const [draggedTarget, setDraggedTarget] = useState<PxPoint | null>(null);
+  const target = draggedTarget ?? defaultTarget;
+  const targetRef = useRef<PxPoint>(target);
+  targetRef.current = target;
+  const dragStartRef = useRef<PxPoint | null>(null);
+
+  const yardsToTarget = Math.round(Math.hypot(target.x - playerPx.x, target.y - playerPx.y) / pxPerYard);
+  const targetToGreen = Math.round(Math.hypot(greenPx.x - target.x, greenPx.y - target.y) / pxPerYard);
+
+  // Report the planning distances upward (for the readout + caddie-the-target).
+  useEffect(() => {
+    onTargetChange?.(yardsToTarget, targetToGreen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yardsToTarget, targetToGreen]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          dragStartRef.current = targetRef.current;
+        },
+        onPanResponderMove: (_evt, g) => {
+          const s = dragStartRef.current;
+          if (!s) return;
+          setDraggedTarget({
+            x: Math.max(0, Math.min(width, s.x + g.dx)),
+            y: Math.max(0, Math.min(height, s.y + g.dy)),
+          });
+        },
+      }),
+    [width, height],
+  );
 
   // Create the base map + static hole layers once per hole/tee.
   useEffect(() => {
@@ -180,15 +220,47 @@ export function HoleMap(props: HoleMapProps) {
           const color = h.kind === "water" ? "#2e6e96" : h.kind === "bunker" ? "#e7d8a6" : "#e5a44d";
           return <Circle key={h.id} cx={p.x} cy={p.y} r={7} fill={color} fillOpacity={0.7} stroke="#ffffff" strokeWidth={1} />;
         })}
-        {/* Remaining-distance line player -> green */}
-        <Line x1={playerPx.x} y1={playerPx.y} x2={greenPx.x} y2={greenPx.y} stroke="#ffd60a" strokeWidth={3} strokeLinecap="round" />
+        {target ? (
+          <>
+            {/* Carry to target (solid) + target to green (dashed) */}
+            <Line x1={playerPx.x} y1={playerPx.y} x2={target.x} y2={target.y} stroke="#ffd60a" strokeWidth={3} strokeLinecap="round" />
+            <Line x1={target.x} y1={target.y} x2={greenPx.x} y2={greenPx.y} stroke="#ffffff" strokeWidth={2} strokeDasharray="5 6" strokeOpacity={0.9} />
+            {/* Target crosshair */}
+            <Circle cx={target.x} cy={target.y} r={10} fill="none" stroke="#ffffff" strokeWidth={2} />
+            <Line x1={target.x - 14} y1={target.y} x2={target.x + 14} y2={target.y} stroke="#ffffff" strokeWidth={1} />
+            <Line x1={target.x} y1={target.y - 14} x2={target.x} y2={target.y + 14} stroke="#ffffff" strokeWidth={1} />
+            {/* Distance labels */}
+            <SvgText x={(playerPx.x + target.x) / 2 + 8} y={(playerPx.y + target.y) / 2} fill="#ffd60a" fontSize={12} fontWeight="800">
+              {yardsToTarget}
+            </SvgText>
+            <SvgText x={(target.x + greenPx.x) / 2 + 8} y={(target.y + greenPx.y) / 2} fill="#ffffff" fontSize={11} fontWeight="700">
+              {targetToGreen}
+            </SvgText>
+          </>
+        ) : (
+          <Line x1={playerPx.x} y1={playerPx.y} x2={greenPx.x} y2={greenPx.y} stroke="#ffd60a" strokeWidth={3} strokeLinecap="round" />
+        )}
         {/* Player */}
         <Circle cx={playerPx.x} cy={playerPx.y} r={16} fill="#2BD576" fillOpacity={0.2} stroke="#2BD576" strokeWidth={1.5} />
         <Circle cx={playerPx.x} cy={playerPx.y} r={9} fill="#2BD576" stroke="#ffffff" strokeWidth={3} />
       </Svg>
 
+      {/* Draggable target handle (only this element captures touch; the rest of the
+          map stays pass-through so the page still scrolls). */}
+      {target ? (
+        <View
+          {...panResponder.panHandlers}
+          style={[styles.targetHandle, { left: target.x - 22, top: target.y - 22 }]}
+        >
+          <View style={styles.targetHandleDot} />
+        </View>
+      ) : null}
+
       <View style={[styles.badge, { pointerEvents: "none" }]}>
         <Text style={styles.badgeText}>Satellite · live</Text>
+      </View>
+      <View style={[styles.hint, { pointerEvents: "none" }]}>
+        <Text style={styles.badgeText}>Drag ✛ to plan your shot</Text>
       </View>
     </View>
   );
@@ -211,4 +283,29 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   badgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  hint: {
+    position: "absolute",
+    bottom: 8,
+    alignSelf: "center",
+    backgroundColor: "rgba(0,0,0,0.55)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+  },
+  targetHandle: {
+    position: "absolute",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  targetHandleDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    borderWidth: 2,
+    borderColor: "#ffffff",
+  },
 });
