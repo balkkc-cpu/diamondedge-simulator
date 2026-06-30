@@ -106,11 +106,21 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
   }, []);
 
   const liveCoord = live.coordinate;
-  const yardsLeft = liveMode && liveCoord && greenGeo ? yardsBetween(liveCoord, greenGeo) : manualYards;
+  // Real GPS only makes sense if you're actually on/near this hole. If the fix is
+  // implausibly far (e.g. you're testing a sample course from across the country),
+  // ignore it and keep manual yardage instead of showing millions of yards.
+  const nearHole = !!(
+    liveCoord &&
+    teeGeo &&
+    greenGeo &&
+    (yardsBetween(liveCoord, greenGeo) <= holeLength + 400 || yardsBetween(liveCoord, teeGeo) <= holeLength + 400)
+  );
+  const liveActive = liveMode && nearHole && !!liveCoord && !!greenGeo;
+  const yardsLeft = liveActive ? yardsBetween(liveCoord as GeoPoint, greenGeo as GeoPoint) : manualYards;
 
   // Live yardage callouts (throttled).
   useEffect(() => {
-    if (!liveMode || !liveCoord || !greenGeo) return;
+    if (!liveActive || !liveCoord || !greenGeo) return;
     if (!voiceEnabled || !announceLiveYardage) return;
     const now = Date.now();
     const last = lastAnnouncedRef.current;
@@ -118,11 +128,11 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
       lastAnnouncedRef.current = { yards: yardsLeft, at: now };
       speak(`${yardsLeft} to the middle`);
     }
-  }, [yardsLeft, liveMode, liveCoord, greenGeo, voiceEnabled, announceLiveYardage]);
+  }, [yardsLeft, liveActive, liveCoord, greenGeo, voiceEnabled, announceLiveYardage]);
 
   // Accurate normalized player position (real GPS projected onto the hole axis).
   const playerPosition: Point = useMemo(() => {
-    if (liveMode && liveCoord && teeGeo && greenGeo) {
+    if (liveActive && liveCoord && teeGeo && greenGeo) {
       return projectToCanvas(teeGeo, greenGeo, liveCoord);
     }
     const progress = Math.min(1, Math.max(0, 1 - manualYards / holeLength));
@@ -130,9 +140,9 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
       x: tee.position.x + (hole.green.center.x - tee.position.x) * progress,
       y: tee.position.y + (hole.green.center.y - tee.position.y) * progress,
     };
-  }, [liveMode, liveCoord, teeGeo, greenGeo, manualYards, holeLength, tee, hole.green.center]);
+  }, [liveActive, liveCoord, teeGeo, greenGeo, manualYards, holeLength, tee, hole.green.center]);
 
-  const playerGeo: GeoPoint | null = liveMode ? liveCoord : null;
+  const playerGeo: GeoPoint | null = liveActive ? liveCoord : null;
 
   const distanceTraveled = holeLength - yardsLeft;
   const forcedCarryYards = hole.hazards
@@ -143,11 +153,11 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
 
   // Accurate front/back from green geometry in live mode; otherwise offsets.
   const frontYards =
-    liveMode && liveCoord && hole.green.frontGeo
+    liveActive && liveCoord && hole.green.frontGeo
       ? yardsBetween(liveCoord, hole.green.frontGeo)
       : Math.max(1, yardsLeft - 16);
   const backYards =
-    liveMode && liveCoord && hole.green.backGeo
+    liveActive && liveCoord && hole.green.backGeo
       ? yardsBetween(liveCoord, hole.green.backGeo)
       : yardsLeft + 15;
 
@@ -238,11 +248,11 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
       <Card>
         <View style={styles.liveRow}>
           <View style={styles.liveStatus}>
-            <View style={[styles.dot, { backgroundColor: liveMode ? palette.success : palette.muted }]} />
+            <View style={[styles.dot, { backgroundColor: liveActive ? palette.success : liveMode ? palette.warning : palette.muted }]} />
             <Text style={[styles.liveText, { color: palette.text }]}>
-              {liveMode ? "Live GPS tracking" : "Manual yardage"}
+              {liveActive ? "Live GPS tracking" : liveMode ? "GPS on (off this hole)" : "Manual yardage"}
             </Text>
-            {liveMode && live.accuracyM ? <Badge label={`±${Math.round(live.accuracyM)}m`} tone="info" /> : null}
+            {liveActive && live.accuracyM ? <Badge label={`±${Math.round(live.accuracyM)}m`} tone="info" /> : null}
           </View>
           {liveMode ? (
             <Pressable onPress={stopLive} hitSlop={8}>
@@ -255,6 +265,12 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
             <Button label="Start live GPS" onPress={startLiveGps} style={{ flex: 1 }} />
             {hasGeo ? <Button label="Simulate walk" variant="secondary" onPress={simulateWalk} style={{ flex: 1 }} /> : null}
           </View>
+        ) : null}
+        {liveMode && !nearHole ? (
+          <Text style={[styles.err, { color: palette.warning }]}>
+            You&apos;re not near this hole, so GPS yardage is paused — using manual yardage. Real GPS yardages work when
+            you&apos;re physically on a nearby (real) course. Try &quot;Simulate walk&quot; here.
+          </Text>
         ) : null}
         {live.error ? <Text style={[styles.err, { color: palette.warning }]}>{live.error}</Text> : null}
       </Card>
@@ -269,7 +285,7 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
           </View>
           <RangeStat label="Back" value={backYards} muted />
         </View>
-        {!liveMode ? (
+        {!liveActive ? (
           <View style={styles.stepRow}>
             <StepButton icon="remove" onPress={() => step(-5)} />
             <Text style={[styles.stepHint, { color: palette.muted }]}>Adjust your number</Text>
