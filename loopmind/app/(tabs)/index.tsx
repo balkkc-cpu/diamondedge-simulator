@@ -2,6 +2,8 @@ import React, { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { personaForUser } from "@/caddie/persona";
 import { Screen } from "@/components/Screen";
 import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
@@ -26,6 +28,7 @@ export default function PlayHome() {
   const nearest = getMockCourses()[0];
   const lastRound = rounds[0];
   const lastSummary = useMemo(() => (lastRound ? summarizeRound(lastRound) : null), [lastRound]);
+  const persona = useMemo(() => personaForUser(email), [email]);
 
   const quickCaddie = () => {
     router.push(`/hole/${nearest.id}/1`);
@@ -41,16 +44,19 @@ export default function PlayHome() {
         </Card>
       ) : null}
 
-      <Card>
-        <Text style={[styles.cardKicker, { color: palette.muted }]}>QUICK CADDIE</Text>
-        <Text style={[styles.cardTitle, { color: palette.text }]}>
-          Get an instant shot recommendation
+      <LinearGradient colors={["#0B3D2E", "#16A34A"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+        <View style={styles.heroBadge}>
+          <Ionicons name="person-circle" size={18} color="#CFE9DC" />
+          <Text style={styles.heroBadgeText}>
+            YOUR CADDIE · {persona.name.toUpperCase()}
+          </Text>
+        </View>
+        <Text style={styles.heroTitle}>“{persona.tagline}”</Text>
+        <Text style={styles.heroBody}>
+          Jump to a hole, set your number, and {persona.name} calls the smart play from the clubs in your bag.
         </Text>
-        <Text style={[styles.cardBody, { color: palette.muted }]}>
-          Jump straight to a hole, set your distance and lie, and let LoopMind tell you the smart play.
-        </Text>
-        <Button label="Open Rangefinder" onPress={quickCaddie} />
-      </Card>
+        <Button label="Open Rangefinder" variant="secondary" onPress={quickCaddie} />
+      </LinearGradient>
 
       <View style={styles.tiles}>
         <Tile icon="map" label="Find a course" onPress={() => router.push("/(tabs)/courses")} />
@@ -88,6 +94,11 @@ export default function PlayHome() {
 
 const styles = StyleSheet.create({
   activeTitle: { color: "#FFFFFF", fontSize: fontSize.lg, fontWeight: "800", marginVertical: spacing.xs },
+  hero: { borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm },
+  heroBadge: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  heroBadgeText: { color: "#CFE9DC", fontSize: fontSize.xs, fontWeight: "800", letterSpacing: 1 },
+  heroTitle: { color: "#FFFFFF", fontSize: fontSize.xl, fontWeight: "900", letterSpacing: -0.5 },
+  heroBody: { color: "#E7F2EC", fontSize: fontSize.sm, lineHeight: 19, marginBottom: spacing.xs },
   cardKicker: { fontSize: fontSize.xs, fontWeight: "700", letterSpacing: 1 },
   cardTitle: { fontSize: fontSize.lg, fontWeight: "800" },
   cardBody: { fontSize: fontSize.sm, lineHeight: 19 },

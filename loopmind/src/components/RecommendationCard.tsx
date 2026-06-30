@@ -1,27 +1,39 @@
-import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { Animated, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "@/theme/ThemeProvider";
-import { fontSize, spacing } from "@/theme/colors";
+import { fontSize, radius, spacing } from "@/theme/colors";
 import { CaddieRecommendation } from "@/types/models";
 import { Card } from "./Card";
 import { Badge } from "./Badge";
 
 export function RecommendationCard({ rec }: { rec: CaddieRecommendation }) {
   const { palette } = useTheme();
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    anim.setValue(0);
+    Animated.timing(anim, { toValue: 1, duration: 420, useNativeDriver: true }).start();
+  }, [anim, rec]);
+
+  const animStyle = {
+    opacity: anim,
+    transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+  };
 
   return (
-    <View style={{ gap: spacing.md }}>
-      {/* Headline play */}
-      <Card accent>
+    <Animated.View style={[{ gap: spacing.md }, animStyle]}>
+      {/* Headline play — gradient hero */}
+      <LinearGradient colors={["#0B3D2E", "#16A34A"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
         <View style={styles.headRow}>
           <Text style={styles.kicker}>THE PLAY</Text>
           <Badge label={rec.aiEnhanced ? "AI CADDIE" : "CADDIE"} tone="success" />
         </View>
         <Text style={styles.club}>{rec.primary.clubLabel}</Text>
-        <Text style={styles.playsLike}>Plays like {rec.playsLikeYards} yds</Text>
+        <Text style={styles.playsLike}>Plays like {rec.playsLikeYards} yds · {rec.primary.carryYards} carry</Text>
         <Text style={styles.explanation}>{rec.explanation}</Text>
-      </Card>
+      </LinearGradient>
 
       {/* Target + miss */}
       <Card>
@@ -49,7 +61,7 @@ export function RecommendationCard({ rec }: { rec: CaddieRecommendation }) {
           ))}
         </Card>
       ) : null}
-    </View>
+    </Animated.View>
   );
 
   function Divider() {
@@ -84,6 +96,7 @@ export function RecommendationCard({ rec }: { rec: CaddieRecommendation }) {
 }
 
 const styles = StyleSheet.create({
+  hero: { borderRadius: radius.lg, padding: spacing.lg, gap: spacing.xs },
   headRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   kicker: { color: "#CFE9DC", fontSize: fontSize.xs, fontWeight: "800", letterSpacing: 1.5 },
   club: { color: "#FFFFFF", fontSize: 34, fontWeight: "900", letterSpacing: -0.5 },

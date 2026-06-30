@@ -2,7 +2,15 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Club, ClubId, DominantHand, PlayerProfile, ShotShape, SkillLevel } from "@/types/models";
-import { buildDefaultBag, DEFAULT_SKILL } from "@/constants/clubs";
+import { buildDefaultBag, CLUB_ORDER, DEFAULT_SKILL } from "@/constants/clubs";
+
+/** Add any clubs from the catalog that a saved bag doesn't have yet (off by default). */
+function reconcileBag(clubs: Club[]): Club[] {
+  const byId = new Map(clubs.map((c) => [c.id, c]));
+  return CLUB_ORDER.map(
+    (meta) => byId.get(meta.id) ?? { id: meta.id, label: meta.label, distanceYards: 0, inBag: false },
+  );
+}
 
 interface ProfileState {
   profile: PlayerProfile;
@@ -82,7 +90,11 @@ export const useProfileStore = create<ProfileState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({ profile: s.profile }),
       onRehydrateStorage: () => (state) => {
-        state?.setHasHydrated(true);
+        if (state) {
+          // Bring older saved bags up to the current club catalog.
+          state.profile = { ...state.profile, clubs: reconcileBag(state.profile.clubs) };
+          state.setHasHydrated(true);
+        }
       },
     },
   ),

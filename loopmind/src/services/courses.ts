@@ -1,7 +1,7 @@
 import { Course, GeoPoint } from "@/types/models";
 import { findCourse, getMockCourses } from "@/data/mockCourses";
 import { getCurrentPosition } from "./location";
-import { fetchOsmHoles, getOsmNearbyCourses } from "./osmCourses";
+import { fetchOsmHoles, getOsmCourseBounds, getOsmNearbyCourses } from "./osmCourses";
 
 /**
  * Course discovery.
@@ -83,7 +83,9 @@ export async function ensureCourseLayout(id: string): Promise<Course | undefined
   if (!course) return undefined;
   if (course.holes.length > 0) return course;
   if (course.source === "osm" && course.geo) {
-    const holes = await fetchOsmHoles(course.geo);
+    // Scope holes to the course's exact bounding box when available.
+    const bbox = await getOsmCourseBounds(course.id);
+    const holes = await fetchOsmHoles(course.geo, { bbox });
     const updated: Course = {
       ...course,
       holes,

@@ -23,8 +23,16 @@ interface OverpassElement {
   lat?: number;
   lon?: number;
   center?: { lat: number; lon: number };
+  bounds?: { minlat: number; minlon: number; maxlat: number; maxlon: number };
   tags?: Record<string, string>;
   geometry?: { lat: number; lon: number }[];
+}
+
+export interface BBox {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
 }
 
 async function overpass(query: string, timeoutMs = 20000): Promise<OverpassElement[]> {
@@ -122,19 +130,39 @@ function buildTees(teeGeo: GeoPoint, greenGeo: GeoPoint, lengthYards: number): T
   });
 }
 
+/** Look up the bounding box of a specific OSM course element (fast `out bb`). */
+export async function getOsmCourseBounds(courseId: string): Promise<BBox | null> {
+  const m = courseId.match(/^osm-(way|relation|node)-(\d+)$/);
+  if (!m) return null;
+  const [, type, id] = m;
+  try {
+    const els = await overpass(`[out:json][timeout:20];${type}(${id});out bb tags;`);
+    const b = els[0]?.bounds;
+    if (b) return { south: b.minlat, west: b.minlon, north: b.maxlat, east: b.maxlon };
+  } catch {
+    // ignore — caller falls back to a radius around the center
+  }
+  return null;
+}
+
 /**
  * Fetch real hole/green/hazard geometry for a course and assemble `Hole`s.
- * Returns the holes (possibly empty if OSM lacks per-hole data).
+ * When the course's bounding box is known, holes are scoped to that exact course
+ * (much more accurate than a fixed radius). Returns [] if OSM lacks hole data.
  */
-export async function fetchOsmHoles(center: GeoPoint, radiusM = 1400): Promise<Hole[]> {
+export async function fetchOsmHoles(center: GeoPoint, opts: { bbox?: BBox | null; radiusM?: number } = {}): Promise<Hole[]> {
+  const { bbox, radiusM = 1400 } = opts;
+  const area = bbox
+    ? `(${bbox.south},${bbox.west},${bbox.north},${bbox.east})`
+    : `(around:${radiusM},${center.lat},${center.lng})`;
   const q = `[out:json][timeout:25];
 (
-  way["golf"="hole"](around:${radiusM},${center.lat},${center.lng});
-  way["golf"="green"](around:${radiusM},${center.lat},${center.lng});
-  node["golf"="green"](around:${radiusM},${center.lat},${center.lng});
-  way["golf"="bunker"](around:${radiusM},${center.lat},${center.lng});
-  way["golf"="lateral_water_hazard"](around:${radiusM},${center.lat},${center.lng});
-  way["golf"="water_hazard"](around:${radiusM},${center.lat},${center.lng});
+  way["golf"="hole"]${area};
+  way["golf"="green"]${area};
+  node["golf"="green"]${area};
+  way["golf"="bunker"]${area};
+  way["golf"="lateral_water_hazard"]${area};
+  way["golf"="water_hazard"]${area};
 );
 out geom;`;
 

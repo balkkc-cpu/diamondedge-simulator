@@ -11,8 +11,12 @@ import { useTheme } from "@/theme/ThemeProvider";
 import { fontSize, radius, spacing } from "@/theme/colors";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { useAuthStore } from "@/store/useAuthStore";
+import { useRoundStore } from "@/store/useRoundStore";
 import { recommendShot } from "@/caddie/engine";
 import { withExplanation } from "@/caddie/explain";
+import { analyzeRounds } from "@/caddie/practice";
+import { personaForUser } from "@/caddie/persona";
 import { getCurrentPosition } from "@/services/location";
 import { getWeather } from "@/services/weather";
 import { lerpGeo, projectToCanvas, yardsBetween } from "@/services/geo";
@@ -51,6 +55,11 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
   const voiceEnabled = useSettingsStore((s) => s.voiceEnabled);
   const autoAnnounce = useSettingsStore((s) => s.autoAnnounce);
   const announceLiveYardage = useSettingsStore((s) => s.announceLiveYardage);
+  const email = useAuthStore((s) => s.user?.email);
+  const rounds = useRoundStore((s) => s.rounds);
+
+  const persona = useMemo(() => personaForUser(email), [email]);
+  const analysis = useMemo(() => analyzeRounds(rounds), [rounds]);
 
   const bagCount = profile.clubs.filter((c) => c.inBag && c.id !== "putter" && c.distanceYards > 0).length;
 
@@ -158,7 +167,12 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
   const getAdvice = async () => {
     setLoading(true);
     const base = recommendShot(buildInput());
-    const withText = await withExplanation(buildInput(), base);
+    const withText = await withExplanation(buildInput(), base, {
+      seed: email,
+      weaknessArea: analysis.hasData ? analysis.topWeakness.area : undefined,
+      weaknessLostStrokes: analysis.topWeakness.lostStrokes,
+      holePar: hole.par,
+    });
     setRec(withText);
     setLoading(false);
     if (voiceEnabled && autoAnnounce) speak(withText.explanation);
@@ -320,10 +334,14 @@ export function LiveRangefinder({ course, hole, teeId: initialTeeId }: Props) {
         </Text>
       ) : null}
 
-      <Button label={loading ? "Reading the shot…" : "Get Caddie Advice"} onPress={getAdvice} loading={loading} />
+      <Button
+        label={loading ? `${persona.name} is reading the shot…` : `Ask ${persona.name} for the play`}
+        onPress={getAdvice}
+        loading={loading}
+      />
       <Text style={[styles.bagNote, { color: palette.muted }]}>
-        <Ionicons name="golf-outline" size={12} color={palette.muted} /> Recommending only from the {bagCount} club
-        {bagCount === 1 ? "" : "s"} in your bag. Edit your bag in Profile.
+        <Ionicons name="person-circle-outline" size={12} color={palette.muted} /> Your caddie {persona.name} ·{" "}
+        {persona.tagline} · using the {bagCount} club{bagCount === 1 ? "" : "s"} in your bag.
       </Text>
 
       {rec ? (

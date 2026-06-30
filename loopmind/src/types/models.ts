@@ -18,8 +18,14 @@ export type ClubId =
   | "driver"
   | "3wood"
   | "5wood"
+  | "7wood"
+  | "9wood"
+  | "2hybrid"
   | "3hybrid"
   | "4hybrid"
+  | "5hybrid"
+  | "6hybrid"
+  | "2iron"
   | "3iron"
   | "4iron"
   | "5iron"
@@ -29,8 +35,10 @@ export type ClubId =
   | "9iron"
   | "pw"
   | "gw"
+  | "aw"
   | "sw"
   | "lw"
+  | "60w"
   | "putter";
 
 export interface Club {

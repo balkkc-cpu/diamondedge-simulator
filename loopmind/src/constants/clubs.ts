@@ -5,13 +5,19 @@ interface ClubMeta {
   label: string;
 }
 
-/** Full ordered bag, longest to shortest (putter last). */
+/** Full ordered bag catalog, longest to shortest (putter last). */
 export const CLUB_ORDER: ClubMeta[] = [
   { id: "driver", label: "Driver" },
   { id: "3wood", label: "3 Wood" },
   { id: "5wood", label: "5 Wood" },
+  { id: "7wood", label: "7 Wood" },
+  { id: "9wood", label: "9 Wood" },
+  { id: "2hybrid", label: "2 Hybrid" },
   { id: "3hybrid", label: "3 Hybrid" },
   { id: "4hybrid", label: "4 Hybrid" },
+  { id: "5hybrid", label: "5 Hybrid" },
+  { id: "6hybrid", label: "6 Hybrid" },
+  { id: "2iron", label: "2 Iron" },
   { id: "3iron", label: "3 Iron" },
   { id: "4iron", label: "4 Iron" },
   { id: "5iron", label: "5 Iron" },
@@ -20,9 +26,11 @@ export const CLUB_ORDER: ClubMeta[] = [
   { id: "8iron", label: "8 Iron" },
   { id: "9iron", label: "9 Iron" },
   { id: "pw", label: "Pitching Wedge" },
-  { id: "gw", label: "Gap Wedge" },
-  { id: "sw", label: "Sand Wedge" },
-  { id: "lw", label: "Lob Wedge" },
+  { id: "gw", label: "Gap Wedge (50°)" },
+  { id: "aw", label: "Approach Wedge (52°)" },
+  { id: "sw", label: "Sand Wedge (56°)" },
+  { id: "lw", label: "Lob Wedge (58°)" },
+  { id: "60w", label: "Lob Wedge (60°)" },
   { id: "putter", label: "Putter" },
 ];
 
@@ -125,17 +133,21 @@ const DEFAULT_DISTANCES: Record<SkillLevel, Partial<Record<ClubId, number>>> = {
 };
 
 /**
- * Build a default bag for a skill level. Clubs without a default distance for
- * that level are excluded from the bag (player can add them later).
+ * Build the full club catalog for a skill level. Clubs with a sensible default
+ * for that level start IN the bag; the rest (extra woods/hybrids/irons/wedges)
+ * are available to toggle on, so every player can customize their exact set.
  */
 export function buildDefaultBag(skill: SkillLevel): Club[] {
   const distances = DEFAULT_DISTANCES[skill];
-  return CLUB_ORDER.filter((c) => distances[c.id] !== undefined).map((c) => ({
-    id: c.id,
-    label: c.label,
-    distanceYards: distances[c.id] ?? 0,
-    inBag: true,
-  }));
+  return CLUB_ORDER.map((c) => {
+    const d = distances[c.id];
+    return {
+      id: c.id,
+      label: c.label,
+      distanceYards: d ?? 0,
+      inBag: d !== undefined || c.id === "putter",
+    };
+  });
 }
 
 /** Default skill level used before the user picks one. */

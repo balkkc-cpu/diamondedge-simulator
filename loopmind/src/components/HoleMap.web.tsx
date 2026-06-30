@@ -139,7 +139,8 @@ export function HoleMap(props: HoleMapProps) {
 
   return (
     <View style={[styles.wrap, { width, height, borderColor: palette.border }]}>
-      <View ref={containerRef} style={{ width, height }} />
+      {/* pointer-events none so the (non-interactive) map never traps page scroll/touch */}
+      <View ref={containerRef} style={{ width, height, pointerEvents: "none" }} />
 
       {/* Live overlay: tee, green, hazards, remaining-distance line + player dot.
           Drawn from normalized hole coordinates so it tracks reliably. */}
