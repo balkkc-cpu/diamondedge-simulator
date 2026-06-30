@@ -1,234 +1,117 @@
-# DiamondEdge Simulator
+# LoopMind 🏌️ — AI Golf Caddie
 
-DiamondEdge Simulator is an MLB analytics and simulation platform (not a sportsbook).  
-It runs 1,000-game Monte Carlo style simulations to estimate hit probability, edge, EV, confidence, and suggested unit sizing for baseball market selections.
+LoopMind is an AI caddie for golfers from complete beginners to pros. It knows the
+hole you're on, shows your position and yardages, and recommends the smartest
+shot for **your** skill level — what club to hit, where to aim, the safe miss,
+and why, in plain, encouraging language.
 
-## Legal and Safety
+> **Not a perfect oracle.** GPS, course maps, elevation, green contours and pin
+> data may be approximate or unavailable. LoopMind gives confident *estimates* to
+> help you decide — always use your own judgment on the course.
 
-- No wager processing
-- No sportsbook account integrations
-- No payment processing
-- Simulation estimates only
-- No outcome is guaranteed
-- Creator donations are optional and routed to external payment links only
+## Tech stack
 
-## Tech Stack
+- **React Native + Expo** (file-based routing via `expo-router`), **TypeScript** (strict)
+- **Supabase** for auth, profiles, clubs, rounds and stats (optional — offline mode otherwise)
+- **OpenAI** for natural-language caddie explanations (optional — rule-based fallback)
+- **Weather API** for wind / temp / humidity (optional — mock fallback)
+- **react-native-svg** hole map (swappable for **Mapbox/Google Maps**)
+- **Zustand** + AsyncStorage for state & persistence
+- Light **and** dark mode, green/black/white premium palette
 
-- Next.js + React + TypeScript + Tailwind CSS
-- Prisma ORM + SQLite (default, can switch to Postgres)
-- Recharts for distributions
-- Zustand for bet slip state
-- API adapters with fallback mock data
-- Expo mobile wrapper (`mobile/`) for Android/iOS testing
-
-## Included Pages
-
-- `/` Dashboard
-- `/signup` User signup
-- `/login` User login
-- `/verify-email` Email verification landing
-- `/games/[id]` Game detail page
-- `/bet-builder` Bet builder + bet slip
-- `/simulation-results` 1,000 simulation outputs
-- `/live-tracker` Live scoreboard (inning, count, bases, linescore, win %, pitcher vs batter, last play — MLB Stats API)
-- `/settings` Configuration + legal messaging
-
-## API Integrations (with fallbacks)
-
-Configured in `src/lib/apiClients.ts`:
-
-- MLB Stats API (daily schedule)
-- The Odds API (structure ready; mock fallback)
-- SportsDataIO (injury adapter; mock fallback)
-- Weather API adapter (OpenWeather key slot + fallback)
-- Live score/news key slots in `.env.example`
-
-If keys are missing, app still works using mock datasets.
-
-## User Accounts + Verification
-
-- Users must sign up with email and password.
-- Verification token is generated and must be confirmed before login.
-- Production email is wired with Resend (`RESEND_API_KEY` + `RESEND_FROM_EMAIL`).
-- In local/dev without Resend key, verification URL is returned/logged for testing.
-
-Regular user flow:
-
-1. Open public app link (from Vercel deploy).
-2. Create account at `/signup`.
-3. Verify email via link.
-4. Login at `/login`.
-5. Access simulator pages.
-
-## Quick Start
-
-1. Install Node.js 20+ and npm
-2. Open terminal in project root:
+## Quick start
 
 ```bash
-cd "C:\Users\Dell\Documents\DiamondEdge-Simulator"
+cd loopmind
 npm install
-copy .env.example .env
-npx prisma generate
-npx prisma db push
-npm run db:seed
-npm run dev
+cp .env.example .env     # optional — app runs fully without any keys
+npm run web              # or: npm run ios / npm run android / npm start
 ```
 
-Local app URL:
+The app runs immediately with **zero configuration** in offline/mock mode:
+local accounts, three sample courses, mock weather, and the deterministic
+rule-based caddie. Add keys in `.env` to enable the real integrations.
 
-- [http://localhost:3000](http://localhost:3000)
-
-## Environment Variables
-
-Copy `.env.example` to `.env` and fill as needed:
-
-- `DATABASE_URL` (default SQLite)
-- `ODDS_API_KEY`
-- `SPORTSDATAIO_API_KEY`
-- `OPENWEATHER_API_KEY`
-- `NEWS_API_KEY` (optional)
-- `LIVE_SCORE_API_KEY` (optional)
-- `RESEND_API_KEY` (required for real verification emails)
-- `RESEND_FROM_EMAIL` (verified sender in Resend)
-- `ADMIN_USERNAME` (master account username)
-- `ADMIN_PASSWORD_HASH` (SHA-256 hash of password, never store plain text)
-- `AUTH_SECRET` (long random secret for signed sessions)
-- `NEXT_PUBLIC_PAYPAL_DONATION_URL` (your PayPal link)
-- `NEXT_PUBLIC_VENMO_DONATION_URL` (your Venmo link)
-- `NEXT_PUBLIC_CARD_DONATION_URL` (your card checkout link, e.g. Stripe Payment Link)
-
-Preconfigured per your request:
-
-- Venmo points to `@lecture423` (`https://venmo.com/lecture423`)
-- PayPal donation points to `lecture423@gmail.com`
-
-### Create Master Login Credentials
-
-Master login URL:
-
-- [http://localhost:3000/master-login](http://localhost:3000/master-login)
-
-Generate password hash in PowerShell:
-
-```powershell
-$pwd = "YourSuperStrongPasswordHere"
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($pwd)
-$sha = [System.Security.Cryptography.SHA256]::Create()
-$hash = ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }) -join ""
-$hash
-```
-
-Put output into `ADMIN_PASSWORD_HASH` in `.env`.
-
-## Build for Production
+### Run on a phone
 
 ```bash
-npm install
-npm run build
-npm run start
+npm start                # scan the QR code with Expo Go (iOS/Android)
 ```
 
-## Vercel Deployment (Instant)
+## How the caddie works (important design note)
 
-1. Push this project to GitHub.
-2. Import repo in Vercel.
-3. Set environment variables from `.env.example`.
-4. Deploy.
+The caddie's **decision is always made by a deterministic rule engine**
+(`src/caddie/engine.ts`). It factors in: distance, lie, skill level, the player's
+own club distances, wind, elevation, temperature, hazards/forced carries, pin
+position, shot shape and risk tolerance. OpenAI is used **only** to rewrite the
+resulting facts into warm, human caddie language (`src/caddie/explain.ts`). If no
+OpenAI key is set, a built-in template produces the same advice — so
+recommendations are always reliable and never depend on a network call.
 
-CLI deploy commands:
+## Project structure
+
+```
+loopmind/
+├── app/                          # expo-router routes (screens)
+│   ├── _layout.tsx               # root: theme + auth/onboarding routing gate
+│   ├── (auth)/                   # sign-in / sign-up
+│   ├── onboarding/               # skill → hand/shape → club distances
+│   ├── (tabs)/                   # Play · Courses · Practice · Profile
+│   ├── course/[id].tsx           # course detail + hole list + start round
+│   ├── hole/[courseId]/[holeNumber].tsx   # rangefinder + AI recommendation
+│   ├── round/active.tsx          # live round tracking
+│   ├── round/summary.tsx         # round summary
+│   └── putting.tsx               # putting assistant
+├── src/
+│   ├── caddie/                   # engine.ts, explain.ts, practice.ts  ← the brain
+│   ├── components/               # reusable UI (Card, Button, HoleMap, …)
+│   ├── constants/                # club defaults, skill metadata
+│   ├── data/mockCourses.ts       # 3 built-in sample courses (+ generator)
+│   ├── lib/                      # env + supabase client
+│   ├── services/                 # location, weather, courses, openai
+│   ├── store/                    # zustand stores (auth, profile, rounds)
+│   ├── theme/                    # palette + ThemeProvider (light/dark)
+│   └── types/models.ts           # shared domain types
+└── supabase/schema.sql           # full DB schema + RLS policies
+```
+
+## Features (MVP)
+
+- **Onboarding** — skill level, dominant hand, shot shape, club distances with an
+  "I don't know my distances" path that loads sensible defaults you can tune.
+- **Courses** — GPS "nearby" list (mock until a provider is connected) + search.
+- **Rangefinder** — big front/middle/back yardages, tee selector, hazards &
+  carries, SVG hole map with your position and aim line.
+- **AI caddie** — club, target line, safe miss, conservative/aggressive options,
+  expected result and a plain-English explanation; skill-aware strategy.
+- **Round mode** — track strokes, putts, chips, penalties, fairways and GIR;
+  saved round history.
+- **Putting assistant** — start line + speed from distance, slope and break.
+- **Practice** — estimates lost strokes per area and builds a weekly plan.
+
+## Plugging in real APIs
+
+Search for these clearly-marked extension points:
+
+| Integration | File | What to do |
+|---|---|---|
+| Course data | `src/services/courses.ts`, `src/data/mockCourses.ts` | Replace mock returns with a real course-data provider; keep the `Course` shape. |
+| Maps | `src/components/HoleMap.tsx` | Swap the SVG renderer for Mapbox/Google using real lat/lng. |
+| Weather | `src/services/weather.ts` | Fill in the real fetch when `EXPO_PUBLIC_WEATHER_API_KEY` is set. |
+| AI wording | `src/services/openai.ts` | Set `EXPO_PUBLIC_OPENAI_API_KEY` (proxy via your backend in prod). |
+| Auth / DB | `src/lib/supabase.ts`, `supabase/schema.sql` | Set Supabase keys and run the schema. |
+| Green contours | `app/putting.tsx` (`buildPuttPlan`) | Replace the manual read with contour-derived data. |
+
+## Roadmap (post-MVP)
+
+Real course API integration · hazard mapping from GPS · live weather/wind ·
+green-reading from contour data · advanced shot dispersion · tournament mode.
+
+## Scripts
 
 ```bash
-npm i -g vercel
-vercel login
-vercel
-vercel --prod
+npm run web         # run in the browser
+npm start           # Expo dev server (Expo Go / simulators)
+npm run typecheck   # tsc --noEmit
+npm run lint        # expo lint
 ```
-
-After deploy, Vercel gives your public website link.
-
-**Production link (bookmark / share):** [https://diamond-edge-simulator.vercel.app](https://diamond-edge-simulator.vercel.app)
-
-This is your regular app link to share with everyone. They can sign up and verify email.
-
-After each code push, run `vercel --prod` from the project folder so this URL shows the latest build.
-
-## Phones & tablets (what to tell users)
-
-DiamondEdge is a **normal website**. Share this link — nothing else is required:
-
-**https://diamond-edge-simulator.vercel.app**
-
-**Optional home-screen icon (recommended wording for users):** “Open the link in your browser, then use **Add to Home Screen** / **Install app** — that saves a shortcut to the **same** site. No separate download, no ‘helper’ app, no App Store step.”
-
-- **iPhone (Safari):** Share → **Add to Home Screen**
-- **Android (Chrome):** ⋮ → **Install app** or **Add to Home screen**
-
-The site ships a small **PWA manifest** so the install prompt looks like a real app icon where the browser supports it.
-
-### Optional (owners / developers only): native Android wrapper
-
-If you later need a **Play Store `.apk`**, the `mobile/` folder is an Expo **WebView shell** around the same URL — that path is for **you**, not something everyday users should see. See `mobile/README.md` (if present) or `mobile/app.config.js` and use EAS Build when you are ready.
-
-## Security Hardening Included
-
-- Signed, HttpOnly, SameSite strict admin session cookies
-- Owner-only route protection for `/admin`
-- Security headers via `middleware.ts` (CSP, clickjacking, MIME sniffing, referrer policy)
-- API rate limiting for login/simulation/dashboard endpoints
-- Request validation for simulation payloads
-- No direct payment processing in app (external links only)
-
-Important: no internet app can be guaranteed "impenetrable". Keep dependencies updated, set strong secrets, enable HTTPS, and use platform protections (Vercel + provider MFA).
-
-## iPhone App Store (optional, owner)
-
-End users can use **Safari → Add to Home Screen** today. A full App Store binary is optional; if you pursue it, use the `mobile/` Expo project + EAS when you have an Apple Developer account (TestFlight / production).
-
-## App Store / Share Readiness Checklist
-
-- Set production `.env` secrets and donation links
-- Use your own payout pages only
-- Verify legal disclaimer text in UI
-- Run lint/build locally before release
-- Deploy HTTPS production URL on Vercel
-- For mobile store submission, replace WebView wrapper with full native screens if strict store policy requires it
-
-## Data + Simulation Notes
-
-- `src/lib/simEngine.ts` runs 1,000 iterations by default.
-- Factors: offense, bullpen, weather, injuries, variance, and market-specific baselines.
-- Outputs:
-  - Hit probabilities
-  - Parlay probability
-  - EV and edge
-  - Confidence score
-  - Suggested fractional-Kelly-based unit sizing (capped at 1.5u)
-  - Score distribution histogram
-  - Risk labels
-
-## Database Models
-
-Prisma schema includes:
-
-- `Team`
-- `Player`
-- `Game`
-- `OddsMarket`
-- `Bet`
-- `BetSlip`
-- `Simulation`
-- `SimulationResult`
-- `Injury`
-- `LiveGameState`
-
-## MVP Coverage Checklist
-
-- Select MLB games
-- Choose multiple bet types
-- Build straight/parlay slips
-- Run 1,000 simulations
-- View probabilities, EV, edge, unit sizing
-- View score distribution charts
-- Responsive desktop/mobile dashboard
-

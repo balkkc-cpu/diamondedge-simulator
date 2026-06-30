@@ -1,5 +1,0 @@
-# The DiamondEdge (Next.js) app at the repo root is what Vercel builds.
-# Exclude sibling apps/wrappers so they aren't uploaded or type-checked/linted
-# during the Next.js build (they have their own toolchains).
-loopmind
-mobile
