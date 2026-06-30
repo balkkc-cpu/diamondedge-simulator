@@ -58,6 +58,12 @@ export interface Point {
   y: number;
 }
 
+/** Real-world coordinate (WGS84). Used for live GPS + satellite maps. */
+export interface GeoPoint {
+  lat: number;
+  lng: number;
+}
+
 export interface TeeBox {
   id: string;
   name: string;
@@ -66,6 +72,8 @@ export interface TeeBox {
   yards: number;
   /** Position on the normalized hole canvas. */
   position: Point;
+  /** Real-world position (present for OSM / geo-located courses). */
+  geo?: GeoPoint;
 }
 
 export type HazardKind = "water" | "bunker" | "ob" | "trees";
@@ -77,6 +85,8 @@ export interface Hazard {
   /** Carry distance (yards from the selected tee) to clear the hazard. */
   carryYards: number;
   position: Point;
+  /** Real-world position (present for OSM / geo-located courses). */
+  geo?: GeoPoint;
 }
 
 export interface LayupZone {
@@ -95,6 +105,10 @@ export interface Green {
   center: Point;
   front: Point;
   back: Point;
+  /** Real-world green positions (present for OSM / geo-located courses). */
+  centerGeo?: GeoPoint;
+  frontGeo?: GeoPoint;
+  backGeo?: GeoPoint;
 }
 
 export interface Hole {
@@ -122,6 +136,10 @@ export interface Course {
   holes: Hole[];
   /** True for built-in mock courses; real API courses will set this false. */
   isMock: boolean;
+  /** Course center (present for OSM / geo-located courses). */
+  geo?: GeoPoint;
+  /** Data source for UI labelling. */
+  source?: "mock" | "osm";
 }
 
 export interface Weather {

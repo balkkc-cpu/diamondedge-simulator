@@ -3,12 +3,14 @@ import { StyleSheet, View } from "react-native";
 import Svg, { Circle, Ellipse, G, Line, Path, Rect, Text as SvgText } from "react-native-svg";
 import { useTheme } from "@/theme/ThemeProvider";
 import { radius } from "@/theme/colors";
-import { Hole, Point } from "@/types/models";
+import { GeoPoint, Hole, Point } from "@/types/models";
 
-interface HoleMapProps {
+export interface HoleMapProps {
   hole: Hole;
   selectedTeeId: string;
   playerPosition: Point;
+  /** Real-world player position — used by the satellite (web) map. */
+  playerGeo?: GeoPoint | null;
   width: number;
   /** Aspect ratio (height = width * ratio). Holes are tall/portrait. */
   ratio?: number;

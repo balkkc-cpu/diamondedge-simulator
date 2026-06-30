@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Switch, Text, View } from "react-native";
 import { Screen } from "@/components/Screen";
 import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
@@ -11,6 +11,8 @@ import { fontSize, spacing } from "@/theme/colors";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useProfileStore } from "@/store/useProfileStore";
 import { useRoundStore } from "@/store/useRoundStore";
+import { useSettingsStore } from "@/store/useSettingsStore";
+import { speak } from "@/services/speech";
 import { SKILL_LEVELS } from "@/constants/skill";
 import { DominantHand, ShotShape, SkillLevel } from "@/types/models";
 
@@ -24,6 +26,12 @@ export default function ProfileTab() {
   const setHand = useProfileStore((s) => s.setHand);
   const setShotShape = useProfileStore((s) => s.setShotShape);
   const roundsPlayed = useRoundStore((s) => s.rounds.length);
+  const voiceEnabled = useSettingsStore((s) => s.voiceEnabled);
+  const autoAnnounce = useSettingsStore((s) => s.autoAnnounce);
+  const announceLiveYardage = useSettingsStore((s) => s.announceLiveYardage);
+  const setVoiceEnabled = useSettingsStore((s) => s.setVoiceEnabled);
+  const setAutoAnnounce = useSettingsStore((s) => s.setAutoAnnounce);
+  const setAnnounceLiveYardage = useSettingsStore((s) => s.setAnnounceLiveYardage);
 
   return (
     <Screen title="Profile" subtitle={user?.email}>
@@ -45,6 +53,38 @@ export default function ProfileTab() {
             { id: "light", label: "Light" },
             { id: "dark", label: "Dark" },
           ]}
+        />
+      </Card>
+
+      <Card title="Caddie voice">
+        <ToggleRow
+          label="Talking caddie"
+          help="Speak recommendations and updates out loud."
+          value={voiceEnabled}
+          onChange={(v) => {
+            setVoiceEnabled(v);
+            if (v) speak("Voice on. I'm your caddie — let's play smart.");
+          }}
+        />
+        <ToggleRow
+          label="Auto-announce advice"
+          help="Read each recommendation aloud automatically."
+          value={autoAnnounce}
+          onChange={setAutoAnnounce}
+          disabled={!voiceEnabled}
+        />
+        <ToggleRow
+          label="Live yardage callouts"
+          help="Call out the number as you walk the hole."
+          value={announceLiveYardage}
+          onChange={setAnnounceLiveYardage}
+          disabled={!voiceEnabled}
+        />
+        <Button
+          label="Test the voice"
+          variant="secondary"
+          onPress={() => speak("You've got 152 to the middle. Smooth seven iron, aim at the center, and trust it.")}
+          style={{ marginTop: spacing.xs }}
         />
       </Card>
 
@@ -86,6 +126,36 @@ export default function ProfileTab() {
       </Text>
     </Screen>
   );
+
+  function ToggleRow({
+    label,
+    help,
+    value,
+    onChange,
+    disabled,
+  }: {
+    label: string;
+    help: string;
+    value: boolean;
+    onChange: (v: boolean) => void;
+    disabled?: boolean;
+  }) {
+    return (
+      <View style={[styles.toggleRow, { opacity: disabled ? 0.45 : 1 }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.toggleLabel, { color: palette.text }]}>{label}</Text>
+          <Text style={[styles.toggleHelp, { color: palette.muted }]}>{help}</Text>
+        </View>
+        <Switch
+          value={value}
+          onValueChange={onChange}
+          disabled={disabled}
+          trackColor={{ true: palette.primary, false: palette.border }}
+          thumbColor="#ffffff"
+        />
+      </View>
+    );
+  }
 }
 
 const styles = StyleSheet.create({
@@ -95,4 +165,7 @@ const styles = StyleSheet.create({
   label: { fontSize: fontSize.sm, fontWeight: "700", marginBottom: spacing.xs },
   section: { fontSize: fontSize.lg, fontWeight: "800", marginTop: spacing.sm },
   disclaimer: { fontSize: fontSize.xs, lineHeight: 17, marginTop: spacing.md },
+  toggleRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.xs },
+  toggleLabel: { fontSize: fontSize.md, fontWeight: "700" },
+  toggleHelp: { fontSize: fontSize.xs, marginTop: 1, lineHeight: 16 },
 });

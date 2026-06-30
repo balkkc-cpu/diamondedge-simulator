@@ -1,4 +1,4 @@
-import { Course, Green, Hazard, Hole, LayupZone, Point, TeeBox } from "@/types/models";
+import { Course, GeoPoint, Green, Hazard, Hole, LayupZone, Point, TeeBox } from "@/types/models";
 
 /**
  * Built-in mock courses for the MVP.
@@ -146,9 +146,49 @@ function sumPar(holes: Hole[]): number {
   return holes.reduce((acc, h) => acc + h.par, 0);
 }
 
+/**
+ * Attach real-world coordinates to a generated hole so the satellite map + live
+ * GPS tracking work for sample courses too. Each hole is laid out around an
+ * anchor near a real course; normalized canvas positions are converted to
+ * lat/lng using a local flat-earth approximation.
+ */
+function geoFromCanvas(holeOrigin: GeoPoint, holeLenM: number, p: Point): GeoPoint {
+  const alongM = ((0.9 - p.y) / 0.78) * holeLenM; // north (toward green)
+  const crossM = ((p.x - 0.5) / 0.62) * holeLenM; // east
+  const lat = holeOrigin.lat + alongM / 111320;
+  const lng = holeOrigin.lng + crossM / (111320 * Math.cos((holeOrigin.lat * Math.PI) / 180));
+  return { lat, lng };
+}
+
+function attachGeo(holes: Hole[], anchor: GeoPoint): void {
+  holes.forEach((hole, i) => {
+    // Spread holes across the property in a loose 6-column grid (~140m spacing).
+    const row = Math.floor(i / 6);
+    const col = i % 6;
+    const origin: GeoPoint = {
+      lat: anchor.lat + (row * 220) / 111320,
+      lng: anchor.lng + (col * 200) / (111320 * Math.cos((anchor.lat * Math.PI) / 180)),
+    };
+    const holeLenM = hole.green.middleYards * 0.9144;
+    hole.tees.forEach((t) => (t.geo = geoFromCanvas(origin, holeLenM, t.position)));
+    hole.green.centerGeo = geoFromCanvas(origin, holeLenM, hole.green.center);
+    hole.green.frontGeo = geoFromCanvas(origin, holeLenM, hole.green.front);
+    hole.green.backGeo = geoFromCanvas(origin, holeLenM, hole.green.back);
+    hole.hazards.forEach((h) => (h.geo = geoFromCanvas(origin, holeLenM, h.position)));
+  });
+}
+
+const EMERALD_ANCHOR: GeoPoint = { lat: 36.5666, lng: -121.9445 };
+const PINE_ANCHOR: GeoPoint = { lat: 35.1907, lng: -79.4694 };
+const HARBOR_ANCHOR: GeoPoint = { lat: 32.1392, lng: -80.8126 };
+
 const pebbleHoles = generateHoles(3);
 const pineHoles = generateHoles(7);
 const harborHoles = generateHoles(11);
+
+attachGeo(pebbleHoles, EMERALD_ANCHOR);
+attachGeo(pineHoles, PINE_ANCHOR);
+attachGeo(harborHoles, HARBOR_ANCHOR);
 
 export const MOCK_COURSES: Course[] = [
   {
@@ -160,6 +200,8 @@ export const MOCK_COURSES: Course[] = [
     distanceMiles: 1.4,
     holes: pebbleHoles,
     isMock: true,
+    geo: EMERALD_ANCHOR,
+    source: "mock",
   },
   {
     id: "mock-pinehurst-9",
@@ -170,6 +212,8 @@ export const MOCK_COURSES: Course[] = [
     distanceMiles: 4.2,
     holes: pineHoles,
     isMock: true,
+    geo: PINE_ANCHOR,
+    source: "mock",
   },
   {
     id: "mock-harbor-town",
@@ -180,6 +224,8 @@ export const MOCK_COURSES: Course[] = [
     distanceMiles: 7.8,
     holes: harborHoles,
     isMock: true,
+    geo: HARBOR_ANCHOR,
+    source: "mock",
   },
 ];
 
