@@ -197,15 +197,16 @@ export default function HoleScreen() {
     let t = 0;
     live.pushSimulated(lerpGeo(teeGeo, greenGeo, t));
     if (voiceEnabled) speak("Simulating your walk down the hole.");
+    // Small, frequent steps => a smooth countdown and visibly moving marker.
     simTimer.current = setInterval(() => {
-      t += 0.08;
-      if (t >= 0.92) {
-        t = 0.92;
+      t += 0.04;
+      if (t >= 0.94) {
+        t = 0.94;
         if (simTimer.current) clearInterval(simTimer.current);
         simTimer.current = null;
       }
       live.pushSimulated(lerpGeo(teeGeo, greenGeo, t));
-    }, 1600);
+    }, 900);
   };
 
   return (
